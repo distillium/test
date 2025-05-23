@@ -3,21 +3,12 @@
 set -e
 
 INSTALL_DIR="/opt/rw-backup-restore"
-BACKUP_DIR="$INSTALL_DIR/backup" # Эта переменная будет переопределена в новой функции create_backup
+BACKUP_DIR="$INSTALL_DIR/backup"
 CONFIG_FILE="$INSTALL_DIR/config.env"
-SCRIPT_NAME="backup-restore.sh"
+SCRIPT_NAME="backup-restore.sh" 
 SCRIPT_PATH="$INSTALL_DIR/$SCRIPT_NAME"
-RETAIN_BACKUPS_DAYS=7 # Эта переменная будет использоваться в новой функции create_backup
+RETAIN_BACKUPS_DAYS=7
 SYMLINK_PATH="/usr/local/bin/rw-backup"
-
-# Переменные, специфичные для нового бэкапа/восстановления
-CONTAINER_ID="remnawave-db"
-APP_CONTAINER="remnawave"
-COMPOSE_DIR="/opt/remnawave"
-COMPOSE_FILE="$COMPOSE_DIR/docker-compose.yml"
-ENV_SOURCE="/opt/remnawave/.env-node"
-ENV_TARGET_DIR="/opt/remnawave"
-
 
 if [[ "$0" != "$SCRIPT_PATH" && ! -f "$SCRIPT_PATH" ]]; then
     echo "📥 Сохраняем скрипт в $SCRIPT_PATH..."
@@ -53,7 +44,7 @@ install_dependencies() {
 
     if command -v apt-get &> /dev/null; then
         apt-get update -qq > /dev/null 2>&1 || { echo "Ошибка при обновлении списка пакетов."; exit 1; }
-        apt-get install -y toilet figlet procps lsb-release whiptail curl gzip docker.io > /dev/null 2>&1 || { echo "Ошибка при установке необходимых пакетов."; exit 1; }
+        apt-get install -y toilet figlet procps lsb-release whiptail curl gzip > /dev/null 2>&1 || { echo "Ошибка при установке необходимых пакетов."; exit 1; }
         echo "Необходимые пакеты установлены или уже присутствуют."
     else
         echo "Не удалось найти apt-get. Пожалуйста, установите toilet, curl, docker.io и gzip вручную."
@@ -67,26 +58,26 @@ install_dependencies() {
 load_or_create_config() {
     if [[ -f "$CONFIG_FILE" ]]; then
         echo "Загрузка конфигурации из $CONFIG_FILE..."
-        source "$CONFIG_FILE"
+source "$CONFIG_FILE"
 
-        if [[ -z "$BOT_TOKEN" || -z "$CHAT_ID" || -z "$DB_USER" ]]; then
-            echo "⚠️  В файле конфигурации отсутствуют необходимые переменные."
-            echo "▶️  Пожалуйста, введите недостающие данные:"
+if [[ -z "$BOT_TOKEN" || -z "$CHAT_ID" || -z "$DB_USER" ]]; then
+    echo "⚠️  В файле конфигурации отсутствуют необходимые переменные."
+    echo "▶️  Пожалуйста, введите недостающие данные:"
 
-            [[ -z "$BOT_TOKEN" ]] && read -rp "Введите Telegram Bot Token: " BOT_TOKEN
-            [[ -z "$CHAT_ID" ]] && read -rp "Введите Telegram Chat ID: " CHAT_ID
-            [[ -z "$DB_USER" ]] && read -rp "Введите имя пользователя PostgreSQL (по умолчанию postgres): " DB_USER
-            DB_USER=${DB_USER:-postgres}
+    [[ -z "$BOT_TOKEN" ]] && read -rp "Введите Telegram Bot Token: " BOT_TOKEN
+    [[ -z "$CHAT_ID" ]] && read -rp "Введите Telegram Chat ID: " CHAT_ID
+    [[ -z "$DB_USER" ]] && read -rp "Введите имя пользователя PostgreSQL (по умолчанию postgres): " DB_USER
+    DB_USER=${DB_USER:-postgres}
 
-            cat > "$CONFIG_FILE" <<EOF
+    cat > "$CONFIG_FILE" <<EOF
 BOT_TOKEN="$BOT_TOKEN"
 CHAT_ID="$CHAT_ID"
 DB_USER="$DB_USER"
 EOF
 
-            chmod 600 "$CONFIG_FILE" || { echo "Ошибка при установке прав доступа для $CONFIG_FILE."; exit 1; }
-            echo "✅ Конфигурация дополнена и сохранена в $CONFIG_FILE"
-        fi
+    chmod 600 "$CONFIG_FILE" || { echo "Ошибка при установке прав доступа для $CONFIG_FILE."; exit 1; }
+    echo "✅ Конфигурация дополнена и сохранена в $CONFIG_FILE"
+fi
     else
         echo "=== Конфигурация не найдена, создаем новую ==="
         read -rp "Введите Telegram Bot Token: " BOT_TOKEN
@@ -95,9 +86,7 @@ EOF
         DB_USER=${DB_USER:-postgres}
 
         mkdir -p "$INSTALL_DIR" || { echo "Ошибка при создании каталога $INSTALL_DIR."; exit 1; }
-        # BACKUP_DIR здесь создается внутри create_backup, но мы сохраним общую директорию установки
-        # mkdir -p "$BACKUP_DIR" || { echo "Ошибка при создании каталога $BACKUP_DIR."; exit 1; }
-
+        mkdir -p "$BACKUP_DIR" || { echo "Ошибка при создании каталога $BACKUP_DIR."; exit 1; }
 
         cat > "$CONFIG_FILE" <<EOF
 BOT_TOKEN="$BOT_TOKEN"
@@ -184,72 +173,59 @@ send_telegram_document() {
     fi
 }
 
+
 create_backup() {
     clear
     print_ascii_art
     echo "💾 Запись резервной копии..."
 
-    # Используем BACKUP_DIR из основного скрипта, если она существует,
-    # иначе устанавливаем ее по умолчанию для новой логики
-    local CURRENT_BACKUP_DIR="/opt/remnawave-backup"
-    mkdir -p "$CURRENT_BACKUP_DIR" || { echo "Ошибка при создании каталога бэкапов $CURRENT_BACKUP_DIR."; send_telegram_message "❌ Ошибка: Не удалось создать каталог бэкапов $CURRENT_BACKUP_DIR." "None"; exit 1; }
+    mkdir -p "$BACKUP_DIR" || { echo "Ошибка при создании каталога бэкапов $BACKUP_DIR."; send_telegram_message "❌ Ошибка: Не удалось создать каталог бэкапов $BACKUP_DIR." "None"; exit 1; }
 
-    local TIMESTAMP=$(date +%Y-%m-%d"_"%H_%M_%S)
-    local TMP_DIR="/tmp/remnawave_backup_$TIMESTAMP"
-    local BACKUP_FILE_DB="dump_${TIMESTAMP}.sql.gz"
-    local BACKUP_FILE_FINAL="remnawave_backup_${TIMESTAMP}.tar.gz"
-    local FULL_BACKUP_PATH="$CURRENT_BACKUP_DIR/$BACKUP_FILE_FINAL"
+CONTAINER_ID="remnawave-db"
+ENV_SOURCE="/opt/remnawave/.env-node"
+TIMESTAMP=$(date +%Y-%m-%d"_"%H_%M_%S)
+TMP_DIR="/tmp/remnawave_backup_$TIMESTAMP"
+BACKUP_FILE_DB="dump_${TIMESTAMP}.sql.gz"
+BACKUP_FILE_FINAL="remnawave_backup_${TIMESTAMP}.tar.gz"
+FULL_PATH="$BACKUP_DIR/$BACKUP_FILE_FINAL"
 
-    mkdir -p "$TMP_DIR" || { echo "Ошибка при создании временного каталога $TMP_DIR."; send_telegram_message "❌ Ошибка: Не удалось создать временный каталог для бэкапа." "None"; exit 1; }
+  mkdir -p "$TMP_DIR"
 
-    echo "[INFO] Creating PostgreSQL dump and compressing..."
-    if ! docker exec -t "$CONTAINER_ID" pg_dumpall -c -U "$DB_USER" | gzip -9 > "$TMP_DIR/$BACKUP_FILE_DB"; then
-        local STATUS=$?
-        echo "❌ Ошибка при создании дампа PostgreSQL. Код выхода: $STATUS"
-        send_telegram_message "❌ Ошибка при создании дампа PostgreSQL. Код выхода: ${STATUS}" "None"
-        rm -rf "$TMP_DIR"
-        exit $STATUS
-    fi
+  echo "[INFO] Creating PostgreSQL dump and compressing..."
+  docker exec -t "$CONTAINER_ID" pg_dumpall -c -U "$DB_USER" | gzip -9 > "$TMP_DIR/$BACKUP_FILE_DB"
 
-    if [ -f "$ENV_SOURCE" ]; then
-        echo "[INFO] Found .env-node, adding to backup"
-        cp "$ENV_SOURCE" "$TMP_DIR/.env-node" || { echo "❌ Ошибка при копировании .env-node."; send_telegram_message "❌ Ошибка: Не удалось скопировать .env-node в бэкап." "None"; rm -rf "$TMP_DIR"; exit 1; }
-    else
-        echo "[INFO] .env-node not found — continuing without it"
-    fi
+  if [ -f "$ENV_SOURCE" ]; then
+    echo "[INFO] Found .env-node, adding to backup"
+    cp "$ENV_SOURCE" "$TMP_DIR/.env-node"
+  else
+    echo "[INFO] .env-node not found — continuing without it"
+  fi
 
-    echo "[INFO] Creating final archive..."
-    if ! tar -czf "$FULL_BACKUP_PATH" -C "$TMP_DIR" .; then
-        local STATUS=$?
-        echo "❌ Ошибка при создании итогового архива. Код выхода: $STATUS"
-        send_telegram_message "❌ Ошибка при создании итогового архива бэкапа. Код выхода: ${STATUS}" "None"
-        rm -rf "$TMP_DIR"
-        exit $STATUS
-    fi
+  mkdir -p "$BACKUP_DIR"
+  tar -czf "$BACKUP_DIR/$BACKUP_FILE_FINAL" -C "$TMP_DIR" .
 
-    echo "[INFO] Contents of archive:"
-    tar -tzf "$FULL_BACKUP_PATH"
+  echo "[INFO] Contents of archive:"
+  tar -tzf "$BACKUP_DIR/$BACKUP_FILE_FINAL"
 
-    echo "[INFO] Cleaning up temporary files..."
-    rm -rf "$TMP_DIR"
+  echo "[INFO] Cleaning up temporary files..."
+  rm -rf "$TMP_DIR"
 
-    echo "Применение политики хранения бэкапов (оставляем за последние $RETAIN_BACKUPS_DAYS дней)..."
-    find "$CURRENT_BACKUP_DIR" -type f -name "remnawave_backup_*.tar.gz" -mtime +$RETAIN_BACKUPS_DAYS -exec rm -f {} \;
+  echo "[INFO] Removing backups older than 7 days..."
+  find "$BACKUP_DIR" -type f -name "remnawave_backup_*.tar.gz" -mtime +7 -exec rm -f {} \;
 
-    echo -e "✅ Бэкап успешно создан и находится по пути:\n $FULL_BACKUP_PATH"
+  echo "[INFO] Backup completed: $BACKUP_DIR/$BACKUP_FILE_FINAL"
+  echo "Отправка бэкапа в Telegram..."
+    local caption_text=$'💾#backup_success\n➖➖➖➖➖➖➖➖➖\n✅ *The backup has been created*\n📅Date: '"${DATE}"
 
-    echo "Отправка бэкапа в Telegram..."
-    local caption_text=$'💾#backup_success\n➖➖➖➖➖➖➖➖➖\n✅ *The backup has been created*\n📅Date: '"$(date +'%Y-%m-%d %H:%M:%S')"
-
-    if [[ -f "$FULL_BACKUP_PATH" ]]; then
-        if send_telegram_document "$FULL_BACKUP_PATH" "$caption_text"; then
+    if [[ -f "$FULL_PATH" ]]; then
+        if send_telegram_document "$FULL_PATH" "$caption_text"; then
             echo "✅ Успешно"
         else
             echo "❌ Ошибка при отправке бэкапа в Telegram. Подробности выше."
         fi
     else
-        echo "❌ Ошибка: Файл бэкапа не найден после создания: $FULL_BACKUP_PATH"
-        send_telegram_message "❌ Ошибка: Файл бэкапа не найден после создания: ${BACKUP_FILE_FINAL}" "None"; exit 1
+        echo "❌ Ошибка: Файл бэкапа не найден после создания: $FULL_PATH"
+        send_telegram_message "❌ Ошибка: Файл бэкапа не найден после создания: ${FILENAME}" "None"; exit 1
     fi
 }
 
@@ -319,213 +295,105 @@ setup_auto_send() {
 restore_backup() {
     clear
     print_ascii_art
-    echo -e ""
-    echo -e "=== Восстановление из бэкапа ==="
-    echo -e "${RED}!!! ВНИМАНИЕ: Восстановление полностью перезапишет${RESET}"
-    echo -e "${RED}базу данных Remnawave и удалит ее том !!!${RESET}"
-    echo -e "Поместите файл бэкапа (*.tar.gz) в папку: /opt/remnawave-backup" # Обновленный путь
-    echo -e "Убедитесь, что выбрали правильный файл бэкапа"
-    echo -e ""
+  COMPOSE_DIR="/opt/remnawave"
+  COMPOSE_FILE="$COMPOSE_DIR/docker-compose.yml"
+  APP_CONTAINER="remnawave"
+  ENV_TARGET_DIR="/opt/remnawave"
 
-    local CURRENT_BACKUP_DIR="/opt/remnawave-backup" # Используем путь для новых бэкапов
-    mkdir -p "$CURRENT_BACKUP_DIR" # Убедимся, что директория существует
+  echo "[INFO] Stopping and removing containers..."
+  docker compose -f "$COMPOSE_FILE" down
 
-    echo "Доступные файлы бэкапов в $CURRENT_BACKUP_DIR:"
-    BACKUP_FILES=("$CURRENT_BACKUP_DIR"/remnawave_backup_*.tar.gz) # Обновленный шаблон
-    if [ ${#BACKUP_FILES[@]} -eq 0 ] || [ ! -f "${BACKUP_FILES[0]}" ]; then
-        echo "Не найдено файлов бэкапов в $CURRENT_BACKUP_DIR."
-        send_telegram_message "❌ Ошибка: Не найдено файлов бэкапов для восстановления." "None"
-        return
-    fi
+  echo "[INFO] Removing volume with DB data..."
+  docker volume rm remnawave-db-data || true
 
-    readarray -t SORTED_BACKUP_FILES < <(ls -t "$CURRENT_BACKUP_DIR"/remnawave_backup_*.tar.gz 2>/dev/null) # Обновленный шаблон
+  echo "[INFO] Starting DB container..."
+  docker compose -f "$COMPOSE_FILE" up -d "$CONTAINER_ID"
 
-    echo "Выберите файл для восстановления:"
-    select SELECTED_BACKUP in "${SORTED_BACKUP_FILES[@]}"; do
-        if [[ -n "$SELECTED_BACKUP" ]]; then
-            echo "Выбран файл: $SELECTED_BACKUP"
-            break
-        else
-            echo "Неверный выбор."
-        fi
-    done
+  echo "[INFO] Waiting for DB to initialize (10 sec)..."
+  sleep 10
 
-    echo -e $'Вы уверены, что хотите восстановить базу данных? Это удалит текущие данные.\nВведите '"${GREEN}Y${RESET}"$' для подтверждения: '
-    read -r confirm_restore
+  DUMP_ARCHIVE=$(ls -1t "$BACKUP_DIR"/remnawave_backup_*.tar.gz 2>/dev/null | head -n 1)
 
-    if [[ "${confirm_restore,,}" != "y" ]]; then
-        echo "Восстановление отменено."
-        send_telegram_message "✅ Восстановление отменено пользователем." "None"
-        return
-    fi
+  if [ -z "$DUMP_ARCHIVE" ]; then
+    echo "[ERROR] No remnawave_backup_*.tar.gz archive found in $BACKUP_DIR"
+    return 1
+  fi
 
-    echo "Начало процесса полного сброса и восстановления базы данных..."
+  echo "[WARNING] This will restore the DB from:"
+  echo "          $DUMP_ARCHIVE"
+  read -p "Are you sure? [yes/no]: " CONFIRM
 
-    echo "[ИНФО] Остановка и удаление контейнеров..."
-    if ! docker compose -f "$COMPOSE_FILE" down; then
-        echo "Предупреждение: Не удалось корректно остановить сервисы Docker Compose."
-        send_telegram_message "⚠️ Предупреждение: Не удалось корректно остановить сервисы Docker Compose." "None"
-    fi
+  if [[ "$CONFIRM" != "yes" ]]; then
+    echo "[INFO] Operation canceled."
+    return 0
+  fi
 
-    echo "[ИНФО] Удаление volume с данными БД..."
-    docker volume rm remnawave-db-data || true
+  echo "[INFO] Extracting archive..."
+  tar -xzf "$DUMP_ARCHIVE" -C "$BACKUP_DIR"
 
-    echo "[ИНФО] Запуск контейнера с БД..."
-    if ! docker compose -f "$COMPOSE_FILE" up -d "$CONTAINER_ID"; then
-        echo "Критическая ошибка: Не удалось запустить контейнер 'remnawave-db'. Восстановление невозможно."
-        send_telegram_message "❌ Критическая ошибка: Не удалось запустить контейнер 'remnawave-db'. Восстановление невозможно." "None"
-        return
-    fi
+  if [ -f "$BACKUP_DIR/.env-node" ]; then
+    echo "[INFO] Found .env-node. Moving to $ENV_TARGET_DIR"
+    mv -f "$BACKUP_DIR/.env-node" "$ENV_TARGET_DIR/.env-node"
+  else
+    echo "[INFO] .env-node not found in archive. Continuing..."
+  fi
 
-    echo "[ИНФО] Ожидание запуска базы данных (10 секунд)..."
-    sleep 10
+  DUMP_FILE=$(find "$BACKUP_DIR" -name "dump_*.sql.gz" | sort | tail -n 1)
 
-    if ! docker container inspect -f '{{.State.Running}}' "$CONTAINER_ID" 2>/dev/null | grep -q "true"; then
-        echo "Критическая ошибка: Контейнер 'remnawave-db' все еще не запущен после попытки старта. Восстановление невозможно."
-        send_telegram_message "❌ Критическая ошибка: Контейнер 'remnawave-db' все еще не запущен. Восстановление невозможно." "None"
-        return
-    fi
+  if [ ! -f "$DUMP_FILE" ]; then
+    echo "[ERROR] No SQL dump file found."
+    return 1
+  fi
 
-    echo ""
-    echo -e "${RED}!!! ВНИМАНИЕ !!!${RESET}"
-    echo -e "Пожалуйста, убедитесь, что \e[1mимя пользователя PostgreSQL, пароль и база данных\e[0m"
-    echo -e "точно прописаны в файле \e[1m.env\e[0m в директории \e[1mremnawave\e[0m, так как это было на предыдущем сервере."
-    echo "Это крайне важно для успешного восстановления."
-    echo -e $'Вы проверили и подтверждаете, что настройки БД верны?\nВведите '"${GREEN}Y${RESET}"$' для продолжения или '"${RED}N${RESET}"$' для отмены: '
-    read -r confirm_db_settings
+  echo "[INFO] Unzipping dump: $DUMP_FILE"
+  gunzip "$DUMP_FILE"
 
-    if [[ "${confirm_db_settings,,}" != "y" ]]; then
-        echo "Восстановление отменено пользователем."
-        send_telegram_message "✅ Восстановление отменено пользователем." "None"
-        return
-    fi
+  SQL_FILE="${DUMP_FILE%.gz}"
 
-    # Проверка подключения к БД до импорта
-    if ! docker exec -i "$CONTAINER_ID" psql -U "$DB_USER" -d postgres -c "SELECT 1;" > /dev/null 2>&1; then
-        echo "Ошибка: Не удалось подключиться к базе данных 'postgres' в контейнере '$CONTAINER_ID' с пользователем '$DB_USER'."
-        echo "Проверьте имя пользователя БД в $CONFIG_FILE и доступность контейнера."
-        send_telegram_message "❌ Ошибка: Не удалось подключиться к БД в контейнере '$CONTAINER_ID'. Проверьте настройки." "None"
-        return
-    fi
+  if [ ! -f "$SQL_FILE" ]; then
+    echo "[ERROR] Unzipped SQL file not found."
+    return 1
+  fi
 
-    echo "[ИНФО] Распаковка архива..."
-    if ! tar -xzf "$SELECTED_BACKUP" -C "$CURRENT_BACKUP_DIR"; then
-        local STATUS=$?
-        echo "❌ Ошибка при распаковке архива. Код выхода: $STATUS"
-        send_telegram_message "❌ Ошибка при распаковке архива бэкапа. Код выхода: ${STATUS}" "None"
-        return
-    fi
+  echo "[INFO] Restoring DB from: $SQL_FILE"
+  cat "$SQL_FILE" | docker exec -i "$CONTAINER_ID" psql -U "$DB_USER"
+  RESTORE_EXIT_CODE=$?
 
-    # Если в архиве есть .env-node, переместить в нужное место
-    if [ -f "$CURRENT_BACKUP_DIR/.env-node" ]; then
-        echo "[ИНФО] Найден .env-node в архиве. Перемещаем в $ENV_TARGET_DIR"
-        mv -f "$CURRENT_BACKUP_DIR/.env-node" "$ENV_TARGET_DIR/.env-node" || { echo "❌ Ошибка при перемещении .env-node."; send_telegram_message "❌ Ошибка: Не удалось переместить .env-node." "None"; return; }
-    else
-        echo "[ИНФО] Файл .env-node в архиве не найден. Продолжаем без него."
-    fi
+  if [ $RESTORE_EXIT_CODE -eq 0 ]; then
+    echo "[INFO] DB restore successful. Removing: $SQL_FILE"
+    rm -f "$SQL_FILE"
+  else
+    echo "[ERROR] Restore failed. Keeping: $SQL_FILE"
+    return $RESTORE_EXIT_CODE
+  fi
 
-    # Поиск и распаковка SQL-дампа
-    local DUMP_FILE=$(find "$CURRENT_BACKUP_DIR" -name "dump_*.sql.gz" | sort | tail -n 1)
+  echo "[INFO] Starting all services except DB..."
+  docker compose -f "$COMPOSE_FILE" up -d $(docker compose -f "$COMPOSE_FILE" config --services | grep -v "$CONTAINER_ID")
 
-    if [ ! -f "$DUMP_FILE" ]; then
-        echo "[ОШИБКА] Не найден файл дампа после распаковки."
-        send_telegram_message "❌ Ошибка: Не найден файл дампа после распаковки." "None"
-        return
-    fi
-
-    echo "[ИНФО] Распаковка SQL-дампа: $DUMP_FILE"
-    if ! gunzip "$DUMP_FILE"; then
-        local STATUS=$?
-        echo "❌ Ошибка при распаковке SQL-дампа. Код выхода: $STATUS"
-        send_telegram_message "❌ Ошибка при распаковке SQL-дампа. Код выхода: ${STATUS}" "None"
-        return
-    fi
-
-    local SQL_FILE="${DUMP_FILE%.gz}"
-
-    if [ ! -f "$SQL_FILE" ]; then
-        echo "[ОШИБКА] Распакованный SQL-файл не найден."
-        send_telegram_message "❌ Ошибка: Распакованный SQL-файл не найден." "None"
-        return
-    fi
-
-    echo "[ИНФО] Восстановление базы данных из файла: $SQL_FILE"
-    if cat "$SQL_FILE" | docker exec -i "$CONTAINER_ID" psql -U "$DB_USER"; then
-        local RESTORE_EXIT_CODE=0
-        echo "[ИНФО] Восстановление успешно. Удаление временного SQL-файла: $SQL_FILE"
-        rm -f "$SQL_FILE"
-    else
-        local RESTORE_EXIT_CODE=$?
-        echo "[ОШИБКА] Восстановление завершилось с ошибкой. SQL-файл не удалён: $SQL_FILE"
-        send_telegram_message "❌ Ошибка при восстановлении БД. Код выхода: ${RESTORE_EXIT_CODE}" "None"
-        return
-    fi
-
-
-    echo "[ИНФО] Запуск остальных сервисов (без БД)..."
-    if ! docker compose -f "$COMPOSE_FILE" up -d $(docker compose -f "$COMPOSE_FILE" config --services | grep -v "$CONTAINER_ID"); then
-        echo "Предупреждение: Не удалось запустить все остальные сервисы Docker Compose после восстановления."
-        send_telegram_message "⚠️ Предупреждение: Не все сервисы запущены после восстановления." "None"
-    fi
-
-    echo "[ИНФО] Сброс суперпользователя Remnawave..."
-    if ! docker exec -i "$APP_CONTAINER" node <<'EOF'
+  echo "[INFO] Resetting superuser in Remnawave..."
+  docker exec -i "$APP_CONTAINER" node <<'EOF'
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
-
 (async () => {
   try {
     const superadmin = await prisma.admin.findFirst();
     if (!superadmin) {
-      console.error("❌ Суперпользователь не найден.");
+      console.error("❌ Superuser not found.");
       process.exit(1);
     }
-
-    await prisma.admin.delete({
-      where: { uuid: superadmin.uuid },
-    });
-
-    console.log(`✅ Суперпользователь '${superadmin.username}' успешно удалён.`);
+    await prisma.admin.delete({ where: { uuid: superadmin.uuid } });
+    console.log(`✅ Superuser '${superadmin.username}' deleted.`);
   } catch (err) {
-    console.error("❌ Ошибка при удалении суперпользователя:", err);
+    console.error("❌ Error deleting superuser:", err);
     process.exit(1);
   } finally {
     await prisma.$disconnect();
   }
 })();
 EOF
-    then
-        local STATUS=$?
-        echo "❌ Ошибка при сбросе суперпользователя Remnawave. Код выхода: $STATUS"
-        send_telegram_message "❌ Ошибка при сбросе суперпользователя Remnawave. Код выхода: ${STATUS}" "None"
-    else
-        echo "✅ Суперпользователь Remnawave сброшен."
-    fi
 
-    echo "[ИНФО] Восстановление завершено."
-    local restore_success_prefix="✅ Восстановление Remnawave DB успешно завершено из файла: "
-    local restored_filename="${SELECTED_BACKUP##*/}"
-    local escaped_restore_success_prefix=$(escape_markdown_v2 "$restore_success_prefix")
-    local final_restore_success_message="${escaped_restore_success_prefix}${restored_filename}"
-    send_telegram_message "$final_restore_success_message" "MarkdownV2"
-
-    echo "Перезапуск всех сервисов Remnawave и вывод логов..."
-    if ! docker compose down; then
-        echo "Предупреждение: Не удалось остановить сервисы Docker Compose перед полным запуском."
-    fi
-
-    if ! docker compose up -d; then
-        echo "Критическая ошибка: Не удалось запустить все сервисы Docker Compose после восстановления."
-        return
-    else
-        echo "✅ Все сервисы Remnawave запущены."
-    fi
-
-    echo -e "\n--- Логи Remnawave ---"
-    docker compose logs -f -t
-    echo -e "--- Конец логов ---"
+  echo "[INFO] Restore completed."
 }
-
 
 setup_symlink() {
     if [[ -L "$SYMLINK_PATH" ]]; then
@@ -546,8 +414,7 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 mkdir -p "$INSTALL_DIR" || { echo "Ошибка при создании каталога $INSTALL_DIR."; exit 1; }
-# BACKUP_DIR теперь создается внутри create_backup, т.к. ее путь изменился
-# mkdir -p "$BACKUP_DIR" || { echo "Ошибка при создании каталога $BACKUP_DIR."; exit 1; }
+mkdir -p "$BACKUP_DIR" || { echo "Ошибка при создании каталога $BACKUP_DIR."; exit 1; }
 
 
 install_dependencies
@@ -570,7 +437,7 @@ update_script() {
     rm "$SCRIPT_PATH"
     fi
     
-    if curl -fsSL https://raw.githubusercontent.com/distillium/test/main/backup-restore.sh -o "$SCRIPT_PATH"; then
+    if curl -fsSL https://raw.githubusercontent.com/distillium/remnawave-backup-restore/main/backup-restore.sh -o "$SCRIPT_PATH"; then
         chmod +x "$SCRIPT_PATH"
         echo "✅ Скрипт успешно обновлен."
         echo "♻️ Перезапуск скрипта..."
@@ -598,8 +465,6 @@ remove_script() {
     echo "Удаление скрипта и данных..."
     rm -f "$SYMLINK_PATH"
     rm -rf "$INSTALL_DIR"
-    # Удаляем директорию для бэкапов, если она существует по новому пути
-    rm -rf "/opt/remnawave-backup"
 
     echo "✅ Скрипт и связанные файлы удалены."
 }
