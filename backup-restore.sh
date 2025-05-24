@@ -706,7 +706,7 @@ main_menu() {
         case $choice in
             1) create_backup ; read -rp "Нажмите Enter для продолжения..." ;;
             2) setup_auto_send ;; # Внутри есть проверка root
-            3) restore_backup ; read -rp "Нажмите Enter для продолжения..." ;;
+            3) restore_backup ;;
             4) update_script ;; # Внутри есть проверка root и exec
             5) remove_script ;; # Внутри есть проверка root и exit
             6) echo "Выход..."; exit 0 ;;
