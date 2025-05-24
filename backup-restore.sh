@@ -1,5 +1,7 @@
 #!/bin/bash
 
+ORIGINAL_ARGS=("$@")
+
 set -e
 
 INSTALL_DIR="/opt/rw-backup-restore"
@@ -586,7 +588,7 @@ update_script() {
         echo "✅ Скрипт успешно обновлен."
         echo "♻️ Перезапуск скрипта для применения изменений..."
         # Важно: exec заменяет текущий процесс новым.
-        exec "$SCRIPT_PATH" "$@"
+        exec "$SCRIPT_PATH" "${ORIGINAL_ARGS[@]}"
     else
         echo "❌ Ошибка при перезаписи скрипта. Код выхода: $?"
         echo "Восстанавливаем резервную копию..."
