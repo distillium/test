@@ -552,7 +552,7 @@ update_script() {
     echo "[DEBUG] Резервная копия создана."
 
     echo "[DEBUG] Загрузка последней версии скрипта с URL: https://raw.githubusercontent.com/distillium/test/main/backup-restore.sh во временный файл $TEMP_SCRIPT_PATH..."
-    curl -fsSL https://raw.githubusercontent.com/distillium/test/main/backup-restore.sh -o "$TEMP_SCRIPT_PATH"
+    curl -fsSL "https://raw.githubusercontent.com/distillium/test/main/backup-restore.sh?$(date +%s)" -o "$TEMP_SCRIPT_PATH"
     CURL_STATUS=$? # Сохраняем код выхода curl
     if [ $CURL_STATUS -ne 0 ]; then
         echo "❌ Ошибка при загрузке новой версии скрипта. Код выхода curl: $CURL_STATUS"
@@ -588,6 +588,7 @@ update_script() {
         echo "✅ Скрипт успешно обновлен."
         echo "♻️ Перезапуск скрипта для применения изменений..."
         # Важно: exec заменяет текущий процесс новым.
+        hash -r
         exec "$SCRIPT_PATH" "${ORIGINAL_ARGS[@]}"
     else
         echo "❌ Ошибка при перезаписи скрипта. Код выхода: $?"
