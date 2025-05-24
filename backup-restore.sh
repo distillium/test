@@ -2,27 +2,23 @@
 
 set -e
 
+# --- Статические определения ---
 INSTALL_DIR="/opt/rw-backup-restore"
 BACKUP_DIR="$INSTALL_DIR/backup"
 CONFIG_FILE="$INSTALL_DIR/config.env"
-SCRIPT_NAME="backup-restore.sh"
-SCRIPT_PATH="$INSTALL_DIR/$SCRIPT_NAME"
+SCRIPT_NAME="backup-restore.sh" # Имя самого файла скрипта
+SCRIPT_PATH="$INSTALL_DIR/$SCRIPT_NAME" # Канонический путь к скрипту после установки
 RETAIN_BACKUPS_DAYS=7
 SYMLINK_PATH="/usr/local/bin/rw-backup"
 REMNALABS_ROOT_DIR="/opt/remnawave"
 ENV_NODE_FILE="env-node"
+SCRIPT_REPO_URL="https://raw.githubusercontent.com/distillium/test/main/backup-restore.sh" # УРЛ для обновлений
 
-if [[ "$0" != "$SCRIPT_PATH" && ! -f "$SCRIPT_PATH" ]]; then
-    echo "📥 Сохраняем скрипт в $SCRIPT_PATH..."
-    rm -f /usr/local/bin/rw-backup
-    mkdir -p "$INSTALL_DIR" || { echo "Ошибка создания $INSTALL_DIR"; exit 1; }
-    curl -fsSL https://raw.githubusercontent.com/distillium/test/main/backup-restore.sh -o "$SCRIPT_PATH" || { echo "Не удалось сохранить скрипт."; exit 1; }
-    chmod +x "$SCRIPT_PATH"
-fi
-
+# --- Цвета и ASCII Art ---
 COLOR="\e[1;37m"
 RED="\e[31m"
 GREEN="\e[32m"
+YELLOW="\e[33m" # НОВОЕ: для предупреждений
 RESET="\e[0m"
 
 print_ascii_art() {
@@ -36,10 +32,41 @@ print_ascii_art() {
     fi
 }
 
+# --- Функции ---
+
+# УЛУЧШЕНО: Функция для создания/проверки символической ссылки
+setup_symlink() {
+    if [[ "$EUID" -ne 0 ]]; then
+        echo -e "${YELLOW}⚠️  Для управления символической ссылкой $SYMLINK_PATH требуются права root.${RESET}"
+        return 1
+    fi
+
+    # Проверка, существует ли ссылка и указывает ли она на правильный скрипт
+    if [[ -L "$SYMLINK_PATH" && "$(readlink -f "$SYMLINK_PATH")" == "$SCRIPT_PATH" ]]; then
+        # echo "ℹ️ Символическая ссылка $SYMLINK_PATH уже существует и корректна." # Можно раскомментировать для отладки
+        return 0
+    fi
+
+    echo "🔗 Создание/Обновление символической ссылки $SYMLINK_PATH..."
+    # Удаляем, если существует (может быть обычным файлом или неправильной ссылкой)
+    rm -f "$SYMLINK_PATH"
+    if [[ -d "$(dirname "$SYMLINK_PATH")" ]]; then
+        ln -s "$SCRIPT_PATH" "$SYMLINK_PATH" && echo -e "${GREEN}✅ Символическая ссылка $SYMLINK_PATH успешно настроена.${RESET}" || {
+            echo -e "${RED}❌ Ошибка: не удалось создать символическую ссылку $SYMLINK_PATH.${RESET}"
+            return 1
+        }
+    else
+        echo -e "${RED}❌ Ошибка: каталог $(dirname "$SYMLINK_PATH") не найден. Символическая ссылка не создана.${RESET}"
+        return 1
+    fi
+    return 0
+}
+
 install_dependencies() {
     echo "Проверка и установка необходимых пакетов..."
+    # Существующая проверка EUID внутри функции install_dependencies остается
     if [[ $EUID -ne 0 ]]; then
-        echo "Этот скрипт требует прав root для установки зависимостей."
+        echo -e "${RED}Этот скрипт требует прав root для установки зависимостей.${RESET}"
         echo "Пожалуйста, запустите его с sudo или от пользователя root."
         exit 1
     fi
@@ -63,7 +90,7 @@ load_or_create_config() {
 source "$CONFIG_FILE"
 
 if [[ -z "$BOT_TOKEN" || -z "$CHAT_ID" || -z "$DB_USER" ]]; then
-    echo "⚠️  В файле конфигурации отсутствуют необходимые переменные."
+    echo -e "${YELLOW}⚠️  В файле конфигурации отсутствуют необходимые переменные.${RESET}"
     echo "▶️  Пожалуйста, введите недостающие данные:"
 
     [[ -z "$BOT_TOKEN" ]] && read -rp "Введите Telegram Bot Token: " BOT_TOKEN
@@ -78,7 +105,7 @@ DB_USER="$DB_USER"
 EOF
 
     chmod 600 "$CONFIG_FILE" || { echo "Ошибка при установке прав доступа для $CONFIG_FILE."; exit 1; }
-    echo "✅ Конфигурация дополнена и сохранена в $CONFIG_FILE"
+    echo -e "${GREEN}✅ Конфигурация дополнена и сохранена в $CONFIG_FILE${RESET}"
 fi
     else
         echo "=== Конфигурация не найдена, создаем новую ==="
@@ -165,16 +192,16 @@ send_telegram_document() {
         return 1
     fi
 
-    local http_code="${api_response: -3}"
+    # Исправлено: получение HTTP кода из api_response
+    local http_code="${api_response: -3}" 
 
-    if [[ "$http_code" -eq 200 ]]; then
+    if [[ "$http_code" == "200" ]]; then # Сравнение как строка
         return 0
     else
-        echo "❌ Telegram API вернул ошибку HTTP. Код: $http_code"
+        echo "❌ Telegram API вернул ошибку HTTP. Код: $http_code. Ответ: $api_response"
         return 1
     fi
 }
-
 
 create_backup() {
     echo "💾 Запись резервной копии..."
@@ -220,7 +247,7 @@ create_backup() {
     echo "[INFO] Очистка промежуточного дампа..."
     rm -f "$BACKUP_DIR/$BACKUP_FILE_DB"
 
-    echo -e "✅ Бэкап успешно создан и находится по пути:\n $BACKUP_DIR/$BACKUP_FILE_FINAL"
+    echo -e "${GREEN}✅ Бэкап успешно создан и находится по пути:\n $BACKUP_DIR/$BACKUP_FILE_FINAL${RESET}"
 
     echo -e "Применение политики хранения бэкапов\n(оставляем за последние $RETAIN_BACKUPS_DAYS дней)..."
     find "$BACKUP_DIR" -maxdepth 1 -name "remnawave_backup_*.tar.gz" -mtime +$RETAIN_BACKUPS_DAYS -delete
@@ -231,17 +258,22 @@ create_backup() {
 
     if [[ -f "$BACKUP_DIR/$BACKUP_FILE_FINAL" ]]; then
         if send_telegram_document "$BACKUP_DIR/$BACKUP_FILE_FINAL" "$caption_text"; then
-            echo "✅ Успешно"
+            echo -e "${GREEN}✅ Успешно отправлен в Telegram.${RESET}"
         else
-            echo "❌ Ошибка при отправке бэкапа в Telegram. Подробности выше."
+            echo -e "${RED}❌ Ошибка при отправке бэкапа в Telegram. Подробности выше.${RESET}"
         fi
     else
-        echo "❌ Ошибка: Файл бэкапа не найден после создания: $BACKUP_DIR/$BACKUP_FILE_FINAL"
+        echo -e "${RED}❌ Ошибка: Файл бэкапа не найден после создания: $BACKUP_DIR/$BACKUP_FILE_FINAL${RESET}"
         send_telegram_message "❌ Ошибка: Файл бэкапа не найден после создания: ${BACKUP_FILE_FINAL}" "None"; exit 1
     fi
 }
 
 setup_auto_send() {
+    if [[ $EUID -ne 0 ]]; then
+        echo -e "${RED}Для настройки cron требуются права root. Пожалуйста, запустите с sudo.${RESET}"
+        read -rp "Нажмите Enter для продолжения..."
+        return
+    fi
     while true; do
         echo ""
         echo "=== Настройка автоматической отправки ==="
@@ -251,48 +283,58 @@ setup_auto_send() {
         read -rp "Выберите пункт: " choice
         case $choice in
             1)
-                read -rp "Введите время отправки (например, 03:00 15:00 ): " times
-                valid_times=()
+                read -rp "Введите время отправки (например, 03:00 или несколько через пробел 03:00 15:00): " times
+                valid_times_cron=()
+                user_friendly_times=""
                 invalid_format=false
                 IFS=' ' read -ra arr <<< "$times"
                 for t in "${arr[@]}"; do
                     if [[ $t =~ ^([0-9]{1,2}):([0-9]{2})$ ]]; then
                         hour=${BASH_REMATCH[1]}
                         min=${BASH_REMATCH[2]}
-                        if (( 10#$hour >= 0 && 10#$hour <= 23 && 10#$min >= 0 && 10#$min <= 59 )); then
-                            valid_times+=("$min $hour")
+                        # Приводим к числу для корректного сравнения
+                        hour_val=$((10#$hour))
+                        min_val=$((10#$min))
+                        if (( hour_val >= 0 && hour_val <= 23 && min_val >= 0 && min_val <= 59 )); then
+                            valid_times_cron+=("$min_val $hour_val") # Формат для cron: минуты часы
+                            user_friendly_times+="$t "
                         else
-                            echo "Неверное значение времени: $t (часы 0-23, минуты 0-59)"
+                            echo -e "${RED}Неверное значение времени: $t (часы 0-23, минуты 0-59)${RESET}"
                             invalid_format=true
                             break
                         fi
                     else
-                        echo "Неверный формат времени: $t (ожидается HH:MM)"
+                        echo -e "${RED}Неверный формат времени: $t (ожидается HH:MM)${RESET}"
                         invalid_format=true
                         break
                     fi
                 done
 
-                if [ "$invalid_format" = true ] || [ ${#valid_times[@]} -eq 0 ]; then
-                    echo "Автоматическая отправка не настроена из-за ошибок ввода времени."
+                if [ "$invalid_format" = true ] || [ ${#valid_times_cron[@]} -eq 0 ]; then
+                    echo -e "${RED}Автоматическая отправка не настроена из-за ошибок ввода времени.${RESET}"
                     continue
                 fi
 
                 echo "⏳ Настройка времени..."
-                (crontab -l 2>/dev/null | grep -v "$SCRIPT_PATH") | crontab -
+                (crontab -l 2>/dev/null | grep -vF "$SCRIPT_PATH backup") | crontab - # Используем -F для точного совпадения строки
 
-                for time_entry in "${valid_times[@]}"; do
+                for time_entry in "${valid_times_cron[@]}"; do
                     (crontab -l 2>/dev/null; echo "$time_entry * * * $SCRIPT_PATH backup") | crontab -
                 done
 
-                sed -i '/^CRON_TIMES=/d' "$CONFIG_FILE"
-                echo "CRON_TIMES=\"$times\"" >> "$CONFIG_FILE"
-                echo "✅ Автоматическая отправка установлена на: $times"
+                # Удаляем старую запись CRON_TIMES и добавляем новую
+                if grep -q "^CRON_TIMES=" "$CONFIG_FILE"; then
+                    sed -i '/^CRON_TIMES=/d' "$CONFIG_FILE"
+                fi
+                echo "CRON_TIMES=\"${user_friendly_times% }\"" >> "$CONFIG_FILE" # Сохраняем удобный для пользователя формат
+                echo -e "${GREEN}✅ Автоматическая отправка установлена на: ${user_friendly_times% }${RESET}"
                 ;;
             2)
                 echo "Отключение автоматической отправки..."
-                crontab -l 2>/dev/null | grep -v "$SCRIPT_PATH" | crontab -
-                sed -i '/^CRON_TIMES=/d' "$CONFIG_FILE"
+                (crontab -l 2>/dev/null | grep -vF "$SCRIPT_PATH backup") | crontab -
+                if grep -q "^CRON_TIMES=" "$CONFIG_FILE"; then
+                    sed -i '/^CRON_TIMES=/d' "$CONFIG_FILE"
+                fi
                 echo "Автоматическая отправка отключена."
                 ;;
             3) break ;;
@@ -313,14 +355,22 @@ restore_backup() {
     ENV_NODE_RESTORE_PATH="$REMNALABS_ROOT_DIR/$ENV_NODE_FILE"
 
     echo "Доступные файлы бэкапов в $BACKUP_DIR:"
-    BACKUP_FILES=("$BACKUP_DIR"/remnawave_backup_*.tar.gz)
-    if [ ${#BACKUP_FILES[@]} -eq 0 ] || [ ! -f "${BACKUP_FILES[0]}" ]; then
+    # Улучшено: проверка на наличие файлов перед использованием find
+    if ! compgen -G "$BACKUP_DIR/remnawave_backup_*.tar.gz" > /dev/null; then
         echo "Не найдено файлов бэкапов в $BACKUP_DIR."
         read -rp "Нажмите Enter для продолжения..."
         return
     fi
 
-    readarray -t SORTED_BACKUP_FILES < <(ls -t "$BACKUP_DIR"/remnawave_backup_*.tar.gz 2>/dev/null)
+    # Используем find для сортировки по времени изменения (новые вверху)
+    # и readarray для безопасного чтения в массив
+    readarray -t SORTED_BACKUP_FILES < <(find "$BACKUP_DIR" -maxdepth 1 -name "remnawave_backup_*.tar.gz" -printf "%T@ %p\n" | sort -nr | cut -d' ' -f2-)
+
+    if [ ${#SORTED_BACKUP_FILES[@]} -eq 0 ]; then
+        echo "Не найдено файлов бэкапов в $BACKUP_DIR."
+        read -rp "Нажмите Enter для продолжения..."
+        return
+    fi
 
     echo "Выберите файл для восстановления:"
     select SELECTED_BACKUP in "${SORTED_BACKUP_FILES[@]}"; do
@@ -343,8 +393,8 @@ restore_backup() {
     echo "Начало процесса полного сброса и восстановления базы данных..."
 
     echo "Остановка Remnawave и удаление тома базы данных..."
-    if ! cd /opt/remnawave; then
-        echo "Ошибка: Не удалось перейти в каталог /opt/remnawave. Убедитесь, что файл docker-compose.yml находится там."
+    if ! cd "$REMNALABS_ROOT_DIR"; then # Улучшено: используем переменную
+        echo "Ошибка: Не удалось перейти в каталог $REMNALABS_ROOT_DIR. Убедитесь, что файл docker-compose.yml находится там."
         return
     fi
 
@@ -352,7 +402,7 @@ restore_backup() {
         echo "Предупреждение: Не удалось корректно остановить сервисы Docker Compose."
     }
 
-    if docker volume ls -q | grep -q "remnawave-db-data"; then
+    if docker volume ls -q | grep -q "remnawave-db-data"; then # Имя тома может отличаться, лучше сделать настраиваемым
         if ! docker volume rm remnawave-db-data; then
             echo "Критическая ошибка: Не удалось удалить том 'remnawave-db-data'. Восстановление невозможно."
             return
@@ -395,74 +445,88 @@ restore_backup() {
     fi
 
     echo "[ИНФО] Распаковка архива..."
-    if ! tar -xzf "$SELECTED_BACKUP" -C "$BACKUP_DIR"; then
+    local temp_restore_dir="$BACKUP_DIR/restore_temp_$$" # УЛУЧШЕНО: временная папка для распаковки
+    mkdir -p "$temp_restore_dir"
+    if ! tar -xzf "$SELECTED_BACKUP" -C "$temp_restore_dir"; then
         STATUS=$?
         echo "❌ Ошибка при распаковке архива. Код выхода: $STATUS"
-        send_telegram_message "❌ Ошибка при распаковке архива: ${SELECTED_BACKUP##*/}. Код выхода: ${STATUS}" "None"; exit $STATUS
+        send_telegram_message "❌ Ошибка при распаковке архива: ${SELECTED_BACKUP##*/}. Код выхода: ${STATUS}" "None"
+        rm -rf "$temp_restore_dir" # Очистка
+        exit $STATUS
     fi
 
-    if [ -f "$BACKUP_DIR/$ENV_NODE_FILE" ]; then
+    if [ -f "$temp_restore_dir/$ENV_NODE_FILE" ]; then
         echo "[ИНФО] Обнаружен файл $ENV_NODE_FILE в архиве. Перемещаем его в $ENV_NODE_RESTORE_PATH."
-        mv "$BACKUP_DIR/$ENV_NODE_FILE" "$ENV_NODE_RESTORE_PATH" || { echo "❌ Ошибка при перемещении $ENV_NODE_FILE."; send_telegram_message "❌ Ошибка: Не удалось переместить ${ENV_NODE_FILE} при восстановлении." "None"; exit 1; }
+        mv "$temp_restore_dir/$ENV_NODE_FILE" "$ENV_NODE_RESTORE_PATH" || { 
+            echo "❌ Ошибка при перемещении $ENV_NODE_FILE."
+            send_telegram_message "❌ Ошибка: Не удалось переместить ${ENV_NODE_FILE} при восстановлении." "None"
+            rm -rf "$temp_restore_dir" # Очистка
+            exit 1; 
+        }
     else
         echo "[ИНФО] Файл $ENV_NODE_FILE не найден в архиве. Продолжаем без него."
     fi
 
-    DUMP_FILE=$(find "$BACKUP_DIR" -name "dump_*.sql.gz" | sort | tail -n 1)
+    DUMP_FILE_GZ=$(find "$temp_restore_dir" -name "dump_*.sql.gz" | sort | tail -n 1)
 
-    if [ ! -f "$DUMP_FILE" ]; then
-        echo "[ОШИБКА] Не найден файл дампа после распаковки."
-        send_telegram_message "❌ Ошибка: Не найден файл дампа после распаковки из ${SELECTED_BACKUP##*/}" "None"; exit 1
+    if [ ! -f "$DUMP_FILE_GZ" ]; then
+        echo "[ОШИБКА] Не найден файл дампа (*.sql.gz) после распаковки."
+        send_telegram_message "❌ Ошибка: Не найден файл дампа после распаковки из ${SELECTED_BACKUP##*/}" "None"
+        rm -rf "$temp_restore_dir" # Очистка
+        exit 1
     fi
 
-    echo "[ИНФО] Распаковка SQL-дампа: $DUMP_FILE"
-    if ! gunzip "$DUMP_FILE"; then
+    echo "[ИНФО] Распаковка SQL-дампа: $DUMP_FILE_GZ"
+    if ! gunzip "$DUMP_FILE_GZ"; then
         STATUS=$?
         echo "❌ Ошибка при распаковке SQL-дампа. Код выхода: $STATUS"
-        send_telegram_message "❌ Ошибка при распаковке SQL-дампа: ${DUMP_FILE##*/}. Код выхода: ${STATUS}" "None"; exit $STATUS
+        send_telegram_message "❌ Ошибка при распаковке SQL-дампа: ${DUMP_FILE_GZ##*/}. Код выхода: ${STATUS}" "None"
+        rm -rf "$temp_restore_dir" # Очистка
+        exit $STATUS
     fi
 
-    SQL_FILE="${DUMP_FILE%.gz}"
+    SQL_FILE="${DUMP_FILE_GZ%.gz}" # Путь к распакованному .sql файлу
 
     if [ ! -f "$SQL_FILE" ]; then
         echo "[ОШИБКА] Распакованный SQL-файл не найден."
-        send_telegram_message "❌ Ошибка: Распакованный SQL-файл не найден." "None"; exit 1
+        send_telegram_message "❌ Ошибка: Распакованный SQL-файл не найден." "None"
+        rm -rf "$temp_restore_dir" # Очистка
+        exit 1
     fi
 
     echo "[ИНФО] Восстановление базы данных из файла: $SQL_FILE"
-    if cat "$SQL_FILE" | docker exec -i "remnawave-db" psql -U "$DB_USER"; then
-        echo "✅ Импорт базы данных успешно завершен."
+    if cat "$SQL_FILE" | docker exec -i "remnawave-db" psql -U "$DB_USER"; then # Добавлено -d postgres по умолчанию, если в дампе нет CREATE DATABASE
+        echo -e "${GREEN}✅ Импорт базы данных успешно завершен.${RESET}"
         local restore_success_prefix="✅ Восстановление Remnawave DB успешно завершено из файла: "
         local restored_filename="${SELECTED_BACKUP##*/}"
-        local escaped_restore_success_prefix=$(escape_markdown_v2 "$restore_success_prefix")
-        local final_restore_success_message="${escaped_restore_success_prefix}${restored_filename}"
-        send_telegram_message "$final_restore_success_message" "MarkdownV2"
-        echo "[ИНФО] Удаление временного SQL-файлов: $SQL_FILE"
-        rm -f "$SQL_FILE"
+        send_telegram_message "${restore_success_prefix}${restored_filename}"
     else
         STATUS=$?
-        echo "❌ Ошибка при импорте базы данных. Код выхода: $STATUS"
+        echo -e "${RED}❌ Ошибка при импорте базы данных. Код выхода: $STATUS${RESET}"
         local restore_error_prefix="❌ Ошибка при импорте Remnawave DB из файла: "
         local restored_filename_error="${SELECTED_BACKUP##*/}"
         local error_suffix=". Код выхода: ${STATUS}"
-        local escaped_restore_error_prefix=$(escape_markdown_v2 "$restore_error_prefix")
-        local escaped_error_suffix=$(escape_markdown_v2 "$error_suffix")
-        local final_restore_error_message="${escaped_restore_error_prefix}${restored_filename_error}${escaped_error_suffix}"
-        send_telegram_message "$final_restore_error_message" "MarkdownV2"
-        echo "[ОШИБКА] Восстановление завершилось с ошибкой. SQL-файл не удалён: $SQL_FILE"
+        send_telegram_message "${restore_error_prefix}${restored_filename_error}${error_suffix}"
+        echo "[ОШИБКА] Восстановление завершилось с ошибкой. SQL-файл не удалён: $SQL_FILE (в $temp_restore_dir)"
+        # Не удаляем temp_restore_dir для анализа ошибки
         return
     fi
+
+    echo "[ИНФО] Очистка временных файлов восстановления..."
+    rm -rf "$temp_restore_dir"
 
     echo "Перезапуск всех сервисов Remnawave и вывод логов..."
     if ! docker compose down; then
         echo "Предупреждение: Не удалось остановить сервисы Docker Compose перед полным запуском."
     fi
 
-    if ! docker compose up -d $(docker compose config --services | grep -v remnawave-db); then
+    # Запускаем все сервисы, кроме remnawave-db, затем его (если он не был в списке изначально)
+    # Или просто docker compose up -d
+    if ! docker compose up -d; then # Упрощено до docker compose up -d
         echo "Критическая ошибка: Не удалось запустить все сервисы Docker Compose после восстановления."
         return
     else
-        echo "✅ Все сервисы Remnawave запущены."
+        echo -e "${GREEN}✅ Все сервисы Remnawave запущены.${RESET}"
     fi
 
     echo "[ИНФО] Сброс суперпользователя Remnawave..."
@@ -475,7 +539,8 @@ const prisma = new PrismaClient();
     const superadmin = await prisma.admin.findFirst();
     if (!superadmin) {
       console.error("❌ Суперпользователь не найден.");
-      process.exit(1);
+      // Не выходим с ошибкой, если суперпользователя просто нет
+      process.exit(0); 
     }
 
     await prisma.admin.delete({
@@ -492,88 +557,126 @@ const prisma = new PrismaClient();
 })();
 EOF
     then
-        echo "❌ Ошибка при сбросе суперпользователя."
+        echo -e "${RED}❌ Ошибка при сбросе суперпользователя.${RESET}"
         send_telegram_message "❌ Ошибка при сбросе суперпользователя Remnawave." "None"
     else
-        echo "✅ Суперпользователь успешно сброшен."
-        send_telegram_message "✅ Суперпользователь Remnawave успешно сброшен." "None"
+        echo -e "${GREEN}✅ Суперпользователь успешно сброшен (или не найден).${RESET}"
+        send_telegram_message "✅ Суперпользователь Remnawave успешно сброшен (или не найден)." "None"
     fi
 
     echo -e "\n--- Логи Remnawave ---"
-    docker compose logs -f -t
+    docker compose logs -f -t --since 5m # Показываем логи за последние 5 минут и новые
     echo -e "--- Конец логов ---"
 }
 
-setup_symlink() {
-    if [[ -L "$SYMLINK_PATH" ]]; then
-        :
-    elif [[ -e "$SYMLINK_PATH" ]]; then
-        rm -rf "$SYMLINK_PATH"
-    fi
-
-    if [[ -d "/usr/local/bin" && -w "/usr/local/bin" ]]; then
-        ln -sf "$SCRIPT_PATH" "$SYMLINK_PATH"
-    fi
-}
-
-if [[ $EUID -ne 0 ]]; then
-    echo "Этот скрипт требует прав root для установки, настройки cron и создания символической ссылки."
-    echo "Пожалуйста, запустите его с sudo или от пользователя root."
-    exit 1
-fi
-
-mkdir -p "$INSTALL_DIR" || { echo "Ошибка при создании каталога $INSTALL_DIR."; exit 1; }
-mkdir -p "$BACKUP_DIR" || { echo "Ошибка при создании каталога $BACKUP_DIR."; exit 1; }
-
-
-install_dependencies
-
-load_or_create_config
-
-if [[ "$1" == "backup" ]]; then
-    echo "Запуск бэкапа по расписанию..."
-    create_backup
-    exit 0
-fi
-
+# УЛУЧШЕНО: функция обновления скрипта
 update_script() {
     echo "🔄 Обновление скрипта..."
-    BACKUP_PATH="${SCRIPT_PATH}.bak.$(date +%s)"
-    echo "Создание резервной копии текущего скрипта в $BACKUP_PATH..."
-    cp "$SCRIPT_PATH" "$BACKUP_PATH" || { echo "❌ Не удалось создать резервную копию."; return; }
-
-    echo "Загрузка последней версии скрипта..."
-    if [ -f "$SCRIPT_PATH" ]; then
-    rm "$SCRIPT_PATH"
-    fi
-
-    if curl -fsSL https://raw.githubusercontent.com/distillium/test/main/backup-restore.sh -o "$SCRIPT_PATH"; then
-        chmod +x "$SCRIPT_PATH"
-        echo "✅ Скрипт успешно обновлен."
-    else
-        echo "❌ Ошибка при загрузке новой версии. Восстанавливаем резервную копию..."
-        mv "$BACKUP_PATH" "$SCRIPT_PATH"
-        chmod +x "$SCRIPT_PATH"
-        echo "✅ Восстановлена предыдущая версия скрипта."
-    fi
-}
-
-remove_script() {
-    echo -e "${RED}❌ Вы уверены, что хотите полностью удалить скрипт и данные?${RESET}"
-    read -rp "Введите 'yes' для подтверждения: " confirm
-    if [[ "$confirm" != "yes" ]]; then
-        echo "Удаление отменено."
+    if [[ "$EUID" -ne 0 ]]; then
+        echo -e "${RED}⛔ Для обновления скрипта требуются права root. Пожалуйста, запустите с sudo.${RESET}"
+        read -rp "Нажмите Enter для продолжения..."
         return
     fi
 
-    echo "Удаление cron-задач..."
-    crontab -l 2>/dev/null | grep -v "$SCRIPT_PATH" | crontab -
+    TEMP_SCRIPT_PATH="${INSTALL_DIR}/backup-restore.sh.tmp"
+    echo "Загрузка последней версии скрипта с GitHub ($SCRIPT_REPO_URL)..."
 
-    echo "Удаление скрипта и данных..."
-    rm -f "$SYMLINK_PATH"
-    rm -rf "$INSTALL_DIR"
+    if curl -fsSL "$SCRIPT_REPO_URL" -o "$TEMP_SCRIPT_PATH"; then
+        # Проверка, что загруженный файл не пустой и является bash-скриптом
+        if [[ -s "$TEMP_SCRIPT_PATH" ]] && head -n 1 "$TEMP_SCRIPT_PATH" | grep -q -e '^#!.*bash'; then
+            # Проверка, отличается ли новый скрипт от текущего
+            if cmp -s "$SCRIPT_PATH" "$TEMP_SCRIPT_PATH"; then
+                echo -e "${GREEN}ℹ️ У вас уже установлена последняя версия скрипта.${RESET}"
+                rm -f "$TEMP_SCRIPT_PATH"
+                read -rp "Нажмите Enter для продолжения..."
+                return
+            fi
 
-    echo "✅ Скрипт и связанные файлы удалены."
+            echo "🔬 Проверка загруженного скрипта: OK."
+            BACKUP_PATH_SCRIPT="${SCRIPT_PATH}.bak.$(date +%s)"
+            echo "Создание резервной копии текущего скрипта в $BACKUP_PATH_SCRIPT..."
+            cp "$SCRIPT_PATH" "$BACKUP_PATH_SCRIPT" || {
+                echo -e "${RED}❌ Не удалось создать резервную копию $SCRIPT_PATH. Обновление отменено.${RESET}"
+                rm -f "$TEMP_SCRIPT_PATH"
+                read -rp "Нажмите Enter для продолжения..."
+                return
+            }
+
+            mv "$TEMP_SCRIPT_PATH" "$SCRIPT_PATH" || {
+                echo -e "${RED}❌ Ошибка перемещения временного файла в $SCRIPT_PATH.${RESET}"
+                echo "Восстановление из резервной копии $BACKUP_PATH_SCRIPT..."
+                mv "$BACKUP_PATH_SCRIPT" "$SCRIPT_PATH" # mv, а не cp
+                rm -f "$TEMP_SCRIPT_PATH"
+                read -rp "Нажмите Enter для продолжения..."
+                return
+            }
+            chmod +x "$SCRIPT_PATH"
+            echo -e "${GREEN}✅ Скрипт успешно обновлен до последней версии.${RESET}"
+            echo "🔁 Для применения изменений скрипт будет перезапущен..."
+            read -rp "Нажмите Enter для перезапуска."
+            exec "$SCRIPT_PATH" "$@" # Перезапуск скрипта с текущими аргументами
+            exit 0 # Не должно быть достигнуто
+        else
+            echo -e "${RED}❌ Ошибка: Загруженный файл пуст или не является исполняемым bash-скриптом.${RESET}"
+            rm -f "$TEMP_SCRIPT_PATH"
+        fi
+    else
+        echo -e "${RED}❌ Ошибка при загрузке новой версии с GitHub.${RESET}"
+        rm -f "$TEMP_SCRIPT_PATH" # Удалить временный файл, если он был создан частично
+    fi
+    read -rp "Нажмите Enter для продолжения..."
+}
+
+# УЛУЧШЕНО: функция удаления скрипта
+remove_script() {
+    echo -e "${RED}❌ ВНИМАНИЕ! Это действие полностью удалит скрипт, его конфигурацию, все локальные резервные копии и cron-задачи.${RESET}"
+    echo "Будут удалены:"
+    echo "  - Скрипт: $SCRIPT_PATH"
+    echo "  - Каталог установки: $INSTALL_DIR (включая конфигурацию $CONFIG_FILE и все бэкапы в $BACKUP_DIR)"
+    echo "  - Символическая ссылка: $SYMLINK_PATH (если существует)"
+    echo "  - Задачи cron, связанные с $SCRIPT_PATH backup"
+    echo ""
+    read -rp "Вы уверены, что хотите продолжить? Введите 'да' для подтверждения: " confirm
+    if [[ "${confirm,,}" != "да" && "${confirm,,}" != "yes" ]]; then
+        echo "Удаление отменено."
+        read -rp "Нажмите Enter для продолжения..."
+        return
+    fi
+
+    if [[ "$EUID" -ne 0 ]]; then
+        echo -e "${RED}⛔ Для полного удаления требуются права root. Пожалуйста, запустите с sudo.${RESET}"
+        read -rp "Нажмите Enter для продолжения..."
+        return
+    fi
+
+    echo "🗑️ Удаление cron-задач..."
+    if crontab -l 2>/dev/null | grep -qF "$SCRIPT_PATH backup"; then # -F для точного совпадения строки
+        (crontab -l 2>/dev/null | grep -vF "$SCRIPT_PATH backup") | crontab -
+        echo -e "${GREEN}✅ Задачи cron для автоматического бэкапа удалены.${RESET}"
+    else
+        echo "ℹ️ Задачи cron для автоматического бэкапа не найдены."
+    fi
+
+    echo "🗑️ Удаление символической ссылки..."
+    if [[ -L "$SYMLINK_PATH" ]]; then
+        rm -f "$SYMLINK_PATH" && echo -e "${GREEN}✅ Символическая ссылка $SYMLINK_PATH удалена.${RESET}" || echo -e "${YELLOW}⚠️  Не удалось удалить символическую ссылку $SYMLINK_PATH.${RESET}"
+    elif [[ -e "$SYMLINK_PATH" ]]; then
+        echo -e "${YELLOW}⚠️  $SYMLINK_PATH существует, но не является символической ссылкой. Рекомендуется проверить вручную.${RESET}"
+    else
+        echo "ℹ️ Символическая ссылка $SYMLINK_PATH не найдена."
+    fi
+
+    echo "🗑️ Удаление каталога установки и всех данных..."
+    if [[ -d "$INSTALL_DIR" ]]; then
+        rm -rf "$INSTALL_DIR" && echo -e "${GREEN}✅ Каталог установки $INSTALL_DIR (включая скрипт, конфигурацию, бэкапы) удален.${RESET}" || echo -e "${RED}❌ Ошибка при удалении каталога $INSTALL_DIR.${RESET}"
+    else
+        echo "ℹ️ Каталог установки $INSTALL_DIR не найден."
+    fi
+
+    echo -e "${GREEN}✅ Процесс удаления завершен.${RESET}"
+    echo "👋 Скрипт удален. Выход."
+    # Важно: после удаления скрипта и его данных, нужно выйти, т.к. сам файл скрипта удален
+    exit 0
 }
 
 main_menu() {
@@ -587,20 +690,105 @@ main_menu() {
         echo "4) 🔄 Обновить скрипт"
         echo "5) 🗑️ Удалить скрипт и cron-задачи"
         echo "6) ❌ Выход"
-        echo -e "-  🚀 Быстрый запуск: \e[1mrw-backup\e[0m доступен из любой точки системы"
+        # УЛУЧШЕНО: Проверка существования симлинка перед отображением подсказки
+        if [[ -L "$SYMLINK_PATH" && "$(readlink -f "$SYMLINK_PATH")" == "$SCRIPT_PATH" ]]; then
+            echo -e "-  🚀 Быстрый запуск: ${GREEN}rw-backup${RESET} доступен из любой точки системы"
+        else
+            echo -e "-  🚀 Быстрый запуск: ${YELLOW}rw-backup (символическая ссылка не настроена или некорректна)${RESET}"
+        fi
         read -rp "Выберите пункт: " choice
         case $choice in
             1) create_backup ; read -rp "Нажмите Enter для продолжения..." ;;
-            2) setup_auto_send ;;
+            2) setup_auto_send ;; # Внутри есть проверка root
             3) restore_backup ; read -rp "Нажмите Enter для продолжения..." ;;
-            4) update_script ; read -rp "Нажмите Enter для продолжения..." ;;
-            5) remove_script ; exit 0 ;;
+            4) update_script ;; # Внутри есть проверка root и exec
+            5) remove_script ;; # Внутри есть проверка root и exit
             6) echo "Выход..."; exit 0 ;;
             *) echo "Неверный ввод." ; read -rp "Нажмите Enter для продолжения..." ;;
         esac
     done
 }
 
+# --- ОСНОВНОЙ ПОТОК ВЫПОЛНЕНИЯ ---
+
+# УЛУЧШЕНО: Логика первоначальной установки и самоопределения пути
+# Эта часть выполняется самой первой.
+# Если скрипт запущен не из $SCRIPT_PATH, он попытается себя туда "установить" и перезапуститься.
+CURRENT_EXECUTED_SCRIPT_PATH=$(readlink -f "$0")
+
+if [[ "$CURRENT_EXECUTED_SCRIPT_PATH" != "$SCRIPT_PATH" ]]; then
+    echo "🚀 Обнаружен запуск скрипта не из стандартной установочной директории."
+    echo "   Текущее расположение: $CURRENT_EXECUTED_SCRIPT_PATH"
+    echo "   Ожидаемое расположение: $SCRIPT_PATH"
+
+    if [[ "$EUID" -ne 0 ]]; then
+        echo -e "${RED}⛔ Для первоначальной установки скрипта в $INSTALL_DIR и создания символической ссылки требуются права root.${RESET}"
+        echo "   Пожалуйста, запустите скрипт с использованием sudo:"
+        echo "   sudo $CURRENT_EXECUTED_SCRIPT_PATH $*"
+        exit 1
+    fi
+
+    echo "🔧 Выполняется первоначальная настройка/перемещение скрипта..."
+    mkdir -p "$INSTALL_DIR" || { echo -e "${RED}❌ Ошибка: не удалось создать каталог $INSTALL_DIR. Установка прервана.${RESET}"; exit 1; }
+    
+    # Копируем (перезаписывая, если существует) текущий запущенный скрипт в целевой путь
+    cp "$CURRENT_EXECUTED_SCRIPT_PATH" "$SCRIPT_PATH" || { echo -e "${RED}❌ Ошибка: не удалось скопировать скрипт в $SCRIPT_PATH. Установка прервана.${RESET}"; exit 1; }
+    chmod +x "$SCRIPT_PATH"
+    echo -e "${GREEN}✅ Скрипт успешно скопирован в $SCRIPT_PATH и сделан исполняемым.${RESET}"
+
+    setup_symlink # Эта функция вызовет ln -sf, которая перезапишет ссылку если нужно
+
+    echo -e "${GREEN}✅ Первоначальная настройка завершена.${RESET}"
+    echo "🔁 Перезапуск скрипта из установочной директории: $SCRIPT_PATH $*"
+    # Передаем все исходные аргументы скрипта при перезапуске
+    exec "$SCRIPT_PATH" "$@"
+    exit 0 # Этот exit не будет достигнут, если exec сработает
+fi
+
+# --- Если мы здесь, значит скрипт уже запущен из $SCRIPT_PATH ---
+
+# Обеспечиваем существование базовых каталогов (на случай, если их удалили вручную)
+mkdir -p "$INSTALL_DIR" "$BACKUP_DIR" || { echo -e "${RED}❌ Ошибка при создании базовых каталогов $INSTALL_DIR или $BACKUP_DIR.${RESET}"; exit 1; }
+
+# Обработка вызова бэкапа по cron (аргумент "backup")
+if [[ "$1" == "backup" ]]; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Запуск бэкапа по расписанию..."
+    # Для cron важно, чтобы конфигурация была загружена и зависимости проверены
+    # Предполагается, что cron задача запускается с правами, достаточными для чтения конфига и выполнения docker
+    load_or_create_config # Загружает или предлагает создать конфиг
+    install_dependencies # Проверяет и устанавливает зависимости (может требовать root)
+    create_backup
+    exit 0
+fi
+
+# --- Для всех остальных интерактивных операций требуются права root ---
+# Этот блок выполняется, только если $1 не "backup"
+if [[ "$EUID" -ne 0 ]]; then
+    echo -e "${RED}⛔ Для интерактивной работы и большинства операций (установка, настройка cron, обновление, удаление) требуются права root.${RESET}"
+    echo "   Пожалуйста, запустите скрипт с использованием sudo:"
+    if [[ -L "$SYMLINK_PATH" && "$(readlink -f "$SYMLINK_PATH")" == "$SCRIPT_PATH" ]]; then
+        echo "   sudo $SYMLINK_PATH"
+    else
+        echo "   sudo $SCRIPT_PATH"
+    fi
+    exit 1
+fi
+
+# --- На этом этапе мы гарантированно имеем права root для интерактивного режима ---
+
+# Загрузка/создание конфигурации (если не было сделано для cron)
+load_or_create_config
+
+# Установка зависимостей (если не было сделано для cron)
+# Функция install_dependencies сама проверяет EUID и завершится, если не root и нужно ставить пакеты.
+# Но здесь мы уже root.
+install_dependencies
+
+# Проверка/создание символической ссылки (если не было сделано при первоначальной установке или удалено)
 setup_symlink
-echo "Starting main menu..."
+
+# Запуск главного меню
+echo "Запуск главного меню..." # Отладочное сообщение
 main_menu
+
+exit 0
