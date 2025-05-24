@@ -528,40 +528,40 @@ restore_backup() {
         echo -e "${GREEN}✅ Все сервисы Remnawave запущены.${RESET}"
     fi
 
-    echo "[ИНФО] Сброс суперпользователя Remnawave..."
-    if ! docker exec -i remnawave node <<'EOF'
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+#    echo "[ИНФО] Сброс суперпользователя Remnawave..."
+#    if ! docker exec -i remnawave node <<'EOF'
+#const { PrismaClient } = require('@prisma/client');
+#const prisma = new PrismaClient();
 
-(async () => {
-  try {
-    const superadmin = await prisma.admin.findFirst();
-    if (!superadmin) {
-      console.error("❌ Суперпользователь не найден.");
-      // Не выходим с ошибкой, если суперпользователя просто нет
-      process.exit(0); 
-    }
+#(async () => {
+#  try {
+#    const superadmin = await prisma.admin.findFirst();
+#    if (!superadmin) {
+#      console.error("❌ Суперпользователь не найден.");
+#      // Не выходим с ошибкой, если суперпользователя просто нет
+#      process.exit(0); 
+#    }
 
-    await prisma.admin.delete({
-      where: { uuid: superadmin.uuid },
-    });
+#    await prisma.admin.delete({
+#      where: { uuid: superadmin.uuid },
+#    });
 
-    console.log(`✅ Суперпользователь '${superadmin.username}' успешно удалён.`);
-  } catch (err) {
-    console.error("❌ Ошибка при удалении суперпользователя:", err);
-    process.exit(1);
-  } finally {
-    await prisma.$disconnect();
-  }
-})();
-EOF
-    then
-        echo -e "${RED}❌ Ошибка при сбросе суперпользователя.${RESET}"
-        send_telegram_message "❌ Ошибка при сбросе суперпользователя Remnawave." "None"
-    else
-        echo -e "${GREEN}✅ Суперпользователь успешно сброшен (или не найден).${RESET}"
-        send_telegram_message "✅ Суперпользователь Remnawave успешно сброшен (или не найден)." "None"
-    fi
+#    console.log(`✅ Суперпользователь '${superadmin.username}' успешно удалён.`);
+#  } catch (err) {
+#    console.error("❌ Ошибка при удалении суперпользователя:", err);
+#    process.exit(1);
+#  } finally {
+#    await prisma.$disconnect();
+#  }
+#})();
+#EOF
+#    then
+#        echo -e "${RED}❌ Ошибка при сбросе суперпользователя.${RESET}"
+#        send_telegram_message "❌ Ошибка при сбросе суперпользователя Remnawave." "None"
+#    else
+#        echo -e "${GREEN}✅ Суперпользователь успешно сброшен (или не найден).${RESET}"
+#        send_telegram_message "✅ Суперпользователь Remnawave успешно сброшен (или не найден)." "None"
+#    fi
 
     echo -e "\n--- Логи Remnawave ---"
     docker compose logs -f -t --since 5m # Показываем логи за последние 5 минут и новые
