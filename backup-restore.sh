@@ -538,26 +538,26 @@ fi
 
 update_script() {
     echo "🔄 Обновление скрипта..."
-    BACKUP_PATH="${SCRIPT_PATH}.bak.$(date +%s)"
-    echo "Создание резервной копии текущего скрипта в $BACKUP_PATH..."
-    cp "$SCRIPT_PATH" "$BACKUP_PATH" || { echo "❌ Не удалось создать резервную копию."; return; }
+    UPDATE_PATH="/opt/rw-backup-restore/backup-restore.sh.new"
+    SCRIPT_SYMLINK="/usr/local/bin/rw-backup"
+    SCRIPT_PATH="/opt/rw-backup-restore/backup-restore.sh"
 
-    echo "Загрузка последней версии скрипта..."
-    if [ -f "$SCRIPT_PATH" ]; then
-    rm "$SCRIPT_PATH"
+    mkdir -p "$(dirname "$UPDATE_PATH")"
+
+    curl -fsSL "https://raw.githubusercontent.com/distillium/test/main/backup-restore.sh?$(date +%s)" -o "$UPDATE_PATH"
+    if [ $? -ne 0 ]; then
+        echo "❌ Ошибка загрузки обновления"
+        return 1
     fi
-    
-    if curl -fsSL https://raw.githubusercontent.com/distillium/test/main/backup-restore.sh -o "$SCRIPT_PATH"; then
-        chmod +x "$SCRIPT_PATH"
-        echo "✅ Скрипт успешно обновлен."
-        echo "♻️ Перезапуск скрипта..."
-        exec "$SCRIPT_PATH" "$@"
-    else
-        echo "❌ Ошибка при загрузке новой версии. Восстанавливаем резервную копию..."
-        mv "$BACKUP_PATH" "$SCRIPT_PATH"
-        chmod +x "$SCRIPT_PATH"
-        echo "✅ Восстановлена предыдущая версия скрипта."
-    fi
+
+    chmod +x "$UPDATE_PATH"
+
+    ln -sf "$UPDATE_PATH" "$SCRIPT_SYMLINK"
+
+    echo "✅ Скрипт успешно обновлен."
+    echo "♻️ Перезапуск скрипта..."
+
+    exec "$UPDATE_PATH" "${ORIGINAL_ARGS[@]}"
 }
 
 remove_script() {
