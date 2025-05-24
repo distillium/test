@@ -20,18 +20,6 @@ if [[ "$0" != "$SCRIPT_PATH" && ! -f "$SCRIPT_PATH" ]]; then
     chmod +x "$SCRIPT_PATH"
 fi
 
-# Если скрипт вызван с аргументом 'self_update_final', это означает, что он был перезапущен для завершения обновления
-if [[ "$1" == "self_update_final" ]]; then
-    shift # Удаляем первый аргумент 'self_update_final'
-    # Теперь, когда основной скрипт уже завершил свою работу, мы можем безопасно заменить файл
-    # Если мы здесь, значит, временный скрипт уже скопирован в SCRIPT_PATH
-    echo "✅ Обновление скрипта успешно завершено."
-    echo "Перезапуск основного меню..."
-    # Теперь запускаем основное меню в текущем процессе
-    main_menu "$@"
-    exit 0
-fi
-
 COLOR="\e[1;37m"
 RED="\e[31m"
 GREEN="\e[32m"
@@ -552,52 +540,48 @@ update_script() {
     echo "🔄 Обновление скрипта..."
     BACKUP_PATH="${SCRIPT_PATH}.bak.$(date +%s)"
     TEMP_SCRIPT_PATH="/tmp/${SCRIPT_NAME}.new"
-    UPDATER_SCRIPT_PATH="/tmp/rw_backup_updater.sh"
 
     echo "Создание резервной копии текущего скрипта в $BACKUP_PATH..."
+    # Создаем резервную копию до любых изменений
     cp "$SCRIPT_PATH" "$BACKUP_PATH" || { echo "❌ Не удалось создать резервную копию."; return; }
 
     echo "Загрузка последней версии скрипта во временный файл..."
-    if curl -fsSL https://raw.githubusercontent.com/distillium/test/main/backup-restore.sh -o "$TEMP_SCRIPT_PATH"; then
-        chmod +x "$TEMP_SCRIPT_PATH"
-        echo "✅ Новая версия скрипта успешно загружена во временный файл."
+    # Скачиваем новую версию скрипта во временный файл
+    if ! curl -fsSL https://raw.githubusercontent.com/distillium/test/main/backup-restore.sh -o "$TEMP_SCRIPT_PATH"; then
+        echo "❌ Ошибка при загрузке новой версии скрипта."
+        # Если загрузка не удалась, не пытаемся что-то делать дальше, оставляем старый скрипт
+        return
+    fi
 
-        # Создаем временный скрипт-обновлятор
-        cat > "$UPDATER_SCRIPT_PATH" <<EOF_UPDATER
-#!/bin/bash
-# Временный скрипт для обновления основного rw-backup-restore.sh
+    # Проверяем, что временный файл существует и исполняем
+    if [ ! -f "$TEMP_SCRIPT_PATH" ] || [ ! -x "$TEMP_SCRIPT_PATH" ]; then
+        echo "❌ Загруженный временный файл скрипта не найден или не является исполняемым."
+        echo "Восстанавливаем предыдущую версию скрипта."
+        mv "$BACKUP_PATH" "$SCRIPT_PATH"
+        chmod +x "$SCRIPT_PATH"
+        return
+    fi
 
-# Ждем, пока основной скрипт завершится
-sleep 2
-
-echo "Выполняем замену основного скрипта..."
-if mv "$TEMP_SCRIPT_PATH" "$SCRIPT_PATH"; then
-    chmod +x "$SCRIPT_PATH"
-    echo "Основной скрипт успешно заменен."
-    # Перезапускаем основной скрипт с флагом self_update_final, чтобы он продолжил работу
-    # из основного меню.
-    exec "$SCRIPT_PATH" self_update_final "$@"
-else
-    echo "Ошибка при замене основного скрипта. Восстанавливаем резервную копию..."
-    mv "$BACKUP_PATH" "$SCRIPT_PATH"
-    chmod +x "$SCRIPT_PATH"
-    echo "Предыдущая версия скрипта восстановлена."
-fi
-rm -f "$UPDATER_SCRIPT_PATH" # Удаляем сам обновлятор
-EOF_UPDATER
-
-        chmod +x "$UPDATER_SCRIPT_PATH"
-        echo "Запускаем скрипт-обновлятор в фоновом режиме и завершаем текущий скрипт..."
-        nohup "$UPDATER_SCRIPT_PATH" "$@" > /dev/null 2>&1 &
-        exit 0 # Завершаем текущий скрипт, чтобы обновлятор мог его заменить
+    echo "Перезаписываем текущий скрипт новой версией..."
+    # Перемещаем новую версию на место старой.
+    # ВНИМАНИЕ: Здесь есть потенциальный риск. Если скрипт очень большой и файловая система
+    # медленная, или если есть активная блокировка, это может привести к проблемам.
+    # Но для небольших скриптов обычно работает.
+    if mv "$TEMP_SCRIPT_PATH" "$SCRIPT_PATH"; then
+        chmod +x "$SCRIPT_PATH"
+        echo "✅ Скрипт успешно обновлен."
+        echo "♻️ Перезапуск скрипта для применения изменений..."
+        # Важно: exec заменяет текущий процесс новым.
+        # Это должен быть **последний** шаг в этой функции.
+        exec "$SCRIPT_PATH" "$@"
     else
-        echo "❌ Ошибка при загрузке новой версии. Восстанавливаем резервную копию..."
+        echo "❌ Ошибка при перезаписи скрипта. Восстанавливаем резервную копию..."
+        # Если перемещение не удалось, восстанавливаем из бэкапа
         mv "$BACKUP_PATH" "$SCRIPT_PATH"
         chmod +x "$SCRIPT_PATH"
         echo "✅ Восстановлена предыдущая версия скрипта."
     fi
 }
-
 
 remove_script() {
     echo -e "${RED}❌ Вы уверены, что хотите полностью удалить скрипт и данные?${RESET}"
@@ -643,10 +627,5 @@ main_menu() {
 }
 
 setup_symlink
-# Проверяем, если скрипт был вызван с флагом 'self_update_final',
-# то запускаем главное меню, иначе выводим сообщение и продолжаем как обычно.
-# Это позволяет избежать запуска main_menu дважды при обычном запуске.
-if [[ "$1" != "self_update_final" ]]; then
-    echo "Starting main menu..."
-    main_menu "$@"
-fi
+echo "Starting main menu..."
+main_menu
