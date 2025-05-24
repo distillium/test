@@ -1,5 +1,5 @@
 #!/bin/bash
-
+ORIGINAL_ARGS=("$@")
 set -e
 
 INSTALL_DIR="/opt/rw-backup-restore"
@@ -538,26 +538,54 @@ fi
 
 update_script() {
     echo "🔄 Обновление скрипта..."
-    UPDATE_PATH="/opt/rw-backup-restore/backup-restore.sh.new"
-    SCRIPT_SYMLINK="/usr/local/bin/rw-backup"
-    SCRIPT_PATH="/opt/rw-backup-restore/backup-restore.sh"
+    BACKUP_PATH="${SCRIPT_PATH}.bak.$(date +%s)"
+    TEMP_SCRIPT_PATH="/tmp/${SCRIPT_NAME}.new"
 
-    mkdir -p "$(dirname "$UPDATE_PATH")"
-
-    curl -fsSL "https://raw.githubusercontent.com/distillium/test/main/backup-restore.sh?$(date +%s)" -o "$UPDATE_PATH"
+    echo "[DEBUG] Создание резервной копии текущего скрипта в $BACKUP_PATH..."
+    cp "$SCRIPT_PATH" "$BACKUP_PATH"
     if [ $? -ne 0 ]; then
-        echo "❌ Ошибка загрузки обновления"
-        return 1
+        echo "❌ Ошибка при создании резервной копии. Код выхода: $?"
+        return
+    fi
+    echo "[DEBUG] Резервная копия создана."
+
+    echo "[DEBUG] Загрузка последней версии скрипта с URL: https://raw.githubusercontent.com/distillium/test/main/backup-restore.sh во временный файл $TEMP_SCRIPT_PATH..."
+    curl -fsSL https://raw.githubusercontent.com/distillium/test/main/backup-restore.sh -o "$TEMP_SCRIPT_PATH"
+    CURL_STATUS=$?
+    if [ $CURL_STATUS -ne 0 ]; then
+        echo "❌ Ошибка при загрузке новой версии скрипта. Код выхода curl: $CURL_STATUS"
+        return
+    fi
+    echo "[DEBUG] Загрузка завершена."
+
+    if [ ! -f "$TEMP_SCRIPT_PATH" ]; then
+        echo "❌ Загруженный временный файл '$TEMP_SCRIPT_PATH' не найден."
+        mv "$BACKUP_PATH" "$SCRIPT_PATH"
+        chmod +x "$SCRIPT_PATH"
+        return
     fi
 
-    chmod +x "$UPDATE_PATH"
+    chmod +x "$TEMP_SCRIPT_PATH" || {
+        echo "❌ Не удалось сделать временный файл исполняемым."
+        mv "$BACKUP_PATH" "$SCRIPT_PATH"
+        chmod +x "$SCRIPT_PATH"
+        return
+    }
 
-    ln -sf "$UPDATE_PATH" "$SCRIPT_SYMLINK"
-
-    echo "✅ Скрипт успешно обновлен."
-    echo "♻️ Перезапуск скрипта..."
-
-    exec "$UPDATE_PATH" "${ORIGINAL_ARGS[@]}"
+    echo "[DEBUG] Перезаписываем текущий скрипт новой версией ($SCRIPT_PATH)..."
+    if mv "$TEMP_SCRIPT_PATH" "$SCRIPT_PATH"; then
+        chmod +x "$SCRIPT_PATH"
+        echo "✅ Скрипт успешно обновлен."
+        echo "♻️ Перезапуск скрипта для применения изменений..."
+        hash -r
+        exec "$SCRIPT_PATH" "${ORIGINAL_ARGS[@]}"
+    else
+        echo "❌ Ошибка при перезаписи скрипта. Код выхода: $?"
+        echo "Восстанавливаем резервную копию..."
+        mv "$BACKUP_PATH" "$SCRIPT_PATH"
+        chmod +x "$SCRIPT_PATH"
+        echo "✅ Восстановлена предыдущая версия скрипта."
+    fi
 }
 
 remove_script() {
