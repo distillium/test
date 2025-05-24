@@ -541,41 +541,55 @@ update_script() {
     BACKUP_PATH="${SCRIPT_PATH}.bak.$(date +%s)"
     TEMP_SCRIPT_PATH="/tmp/${SCRIPT_NAME}.new"
 
-    echo "Создание резервной копии текущего скрипта в $BACKUP_PATH..."
-    # Создаем резервную копию до любых изменений
-    cp "$SCRIPT_PATH" "$BACKUP_PATH" || { echo "❌ Не удалось создать резервную копию."; return; }
+    echo "[DEBUG] Создание резервной копии текущего скрипта в $BACKUP_PATH..."
+    cp "$SCRIPT_PATH" "$BACKUP_PATH"
+    if [ $? -ne 0 ]; then
+        echo "❌ Ошибка при создании резервной копии. Код выхода: $?"
+        return
+    fi
+    echo "[DEBUG] Резервная копия создана."
 
-    echo "Загрузка последней версии скрипта во временный файл..."
-    # Скачиваем новую версию скрипта во временный файл
-    if ! curl -fsSL https://raw.githubusercontent.com/distillium/test/main/backup-restore.sh -o "$TEMP_SCRIPT_PATH"; then
-        echo "❌ Ошибка при загрузке новой версии скрипта."
+    echo "[DEBUG] Загрузка последней версии скрипта с URL: https://raw.githubusercontent.com/distillium/test/main/backup-restore.sh во временный файл $TEMP_SCRIPT_PATH..."
+    curl -fsSL https://raw.githubusercontent.com/distillium/test/main/backup-restore.sh -o "$TEMP_SCRIPT_PATH"
+    CURL_STATUS=$? # Сохраняем код выхода curl
+    if [ $CURL_STATUS -ne 0 ]; then
+        echo "❌ Ошибка при загрузке новой версии скрипта. Код выхода curl: $CURL_STATUS"
         # Если загрузка не удалась, не пытаемся что-то делать дальше, оставляем старый скрипт
         return
     fi
+    echo "[DEBUG] Загрузка завершена. Проверяем файл."
 
     # Проверяем, что временный файл существует и исполняем
-    if [ ! -f "$TEMP_SCRIPT_PATH" ] || [ ! -x "$TEMP_SCRIPT_PATH" ]; then
-        echo "❌ Загруженный временный файл скрипта не найден или не является исполняемым."
+    if [ ! -f "$TEMP_SCRIPT_PATH" ]; then
+        echo "❌ Загруженный временный файл '$TEMP_SCRIPT_PATH' не найден."
         echo "Восстанавливаем предыдущую версию скрипта."
         mv "$BACKUP_PATH" "$SCRIPT_PATH"
         chmod +x "$SCRIPT_PATH"
         return
     fi
+    if [ ! -x "$TEMP_SCRIPT_PATH" ]; then
+        echo "❌ Загруженный временный файл '$TEMP_SCRIPT_PATH' не является исполняемым."
+        chmod +x "$TEMP_SCRIPT_PATH" # Попытаемся сделать исполняемым
+        if [ $? -ne 0 ]; then
+            echo "❌ Не удалось сделать временный файл исполняемым. Код выхода: $?"
+            echo "Восстанавливаем предыдущую версию скрипта."
+            mv "$BACKUP_PATH" "$SCRIPT_PATH"
+            chmod +x "$SCRIPT_PATH"
+            return
+        fi
+        echo "[DEBUG] Временный файл сделан исполняемым."
+    fi
 
-    echo "Перезаписываем текущий скрипт новой версией..."
-    # Перемещаем новую версию на место старой.
-    # ВНИМАНИЕ: Здесь есть потенциальный риск. Если скрипт очень большой и файловая система
-    # медленная, или если есть активная блокировка, это может привести к проблемам.
-    # Но для небольших скриптов обычно работает.
+    echo "[DEBUG] Перезаписываем текущий скрипт новой версией ($SCRIPT_PATH)..."
     if mv "$TEMP_SCRIPT_PATH" "$SCRIPT_PATH"; then
-        chmod +x "$SCRIPT_PATH"
+        chmod +x "$SCRIPT_PATH" # Убеждаемся, что новый файл исполняем
         echo "✅ Скрипт успешно обновлен."
         echo "♻️ Перезапуск скрипта для применения изменений..."
         # Важно: exec заменяет текущий процесс новым.
-        # Это должен быть **последний** шаг в этой функции.
         exec "$SCRIPT_PATH" "$@"
     else
-        echo "❌ Ошибка при перезаписи скрипта. Восстанавливаем резервную копию..."
+        echo "❌ Ошибка при перезаписи скрипта. Код выхода: $?"
+        echo "Восстанавливаем резервную копию..."
         # Если перемещение не удалось, восстанавливаем из бэкапа
         mv "$BACKUP_PATH" "$SCRIPT_PATH"
         chmod +x "$SCRIPT_PATH"
