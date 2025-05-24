@@ -738,6 +738,16 @@ if [[ "$CURRENT_EXECUTED_SCRIPT_PATH" != "$SCRIPT_PATH" ]]; then
 
     setup_symlink # Эта функция вызовет ln -sf, которая перезапишет ссылку если нужно
 
+# --- НОВОЕ ДОБАВЛЕНИЕ: Удаление временного файла ---
+    if [[ -f "$CURRENT_EXECUTED_SCRIPT_PATH" ]]; then
+        # Проверяем, что временный файл не является тем же самым файлом, куда мы только что скопировали
+        # Это важно, чтобы избежать удаления самого себя, если вдруг что-то пошло не так
+        if [[ "$CURRENT_EXECUTED_SCRIPT_PATH" != "$SCRIPT_PATH" ]]; then
+            echo "🗑️ Удаление временного файла: $CURRENT_EXECUTED_SCRIPT_PATH"
+            rm -f "$CURRENT_EXECUTED_SCRIPT_PATH"
+        fi
+    fi
+
     echo -e "${GREEN}✅ Первоначальная настройка завершена.${RESET}"
     echo "🔁 Перезапуск скрипта из установочной директории: $SCRIPT_PATH $*"
     # Передаем все исходные аргументы скрипта при перезапуске
