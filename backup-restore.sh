@@ -368,7 +368,6 @@ restore_backup() {
 
     if [ ${#SORTED_BACKUP_FILES[@]} -eq 0 ]; then
         echo "Не найдено файлов бэкапов в $BACKUP_DIR."
-        read -rp "Нажмите Enter для продолжения..."
         return
     fi
 
@@ -690,7 +689,7 @@ main_menu() {
     while true; do
         clear
         print_ascii_art
-        echo "========= МЕНЮ ========="
+        echo "========= Главное меню ========="
         echo "1) 💾 Сделать бэкап вручную"
         echo "2) ⏰ Настройка автоматической отправки и уведомлений"
         echo "3) ♻️ Восстановление из бэкапа"
