@@ -12,6 +12,7 @@ RETAIN_BACKUPS_DAYS=7
 SYMLINK_PATH="/usr/local/bin/rw-backup"
 REMNALABS_ROOT_DIR="/opt/remnawave"
 ENV_NODE_FILE=".env-node"
+ENV_FILE=".env" # НОВОЕ: Добавляем .env файл
 SCRIPT_REPO_URL="https://raw.githubusercontent.com/distillium/test/main/backup-restore.sh" # УРЛ для обновлений
 
 # --- Цвета и ASCII Art ---
@@ -43,7 +44,7 @@ setup_symlink() {
 
     # Проверка, существует ли ссылка и указывает ли она на правильный скрипт
     if [[ -L "$SYMLINK_PATH" && "$(readlink -f "$SYMLINK_PATH")" == "$SCRIPT_PATH" ]]; then
-        # echo "ℹ️ Символическая ссылка $SYMLINK_PATH уже существует и корректна." # Можно раскомментировать для отладки
+        # echo "ℹ️ Символическая ссылка $SYMLink_PATH уже существует и корректна." # Можно раскомментировать для отладки
         return 0
     fi
 
@@ -210,6 +211,7 @@ create_backup() {
     BACKUP_FILE_DB="dump_${TIMESTAMP}.sql.gz"
     BACKUP_FILE_FINAL="remnawave_backup_${TIMESTAMP}.tar.gz"
     ENV_NODE_PATH="$REMNALABS_ROOT_DIR/$ENV_NODE_FILE"
+    ENV_PATH="$REMNALABS_ROOT_DIR/$ENV_FILE" # НОВОЕ: Путь к .env файлу
 
     mkdir -p "$BACKUP_DIR" || { echo "Ошибка при создании каталога бэкапов $BACKUP_DIR."; send_telegram_message "❌ Ошибка: Не удалось создать каталог бэкапов $BACKUP_DIR." "None"; exit 1; }
 
@@ -226,26 +228,37 @@ create_backup() {
     fi
 
     echo "[INFO] Архивирование бэкапа..."
+    
+    # НОВОЕ: Обработка .env-node и .env файлов для включения в архив
+    FILES_TO_ARCHIVE=("$BACKUP_FILE_DB")
+    
     if [ -f "$ENV_NODE_PATH" ]; then
         echo "[INFO] Обнаружен файл $ENV_NODE_FILE. Добавляем его в архив."
         cp "$ENV_NODE_PATH" "$BACKUP_DIR/" || { echo "❌ Ошибка при копировании $ENV_NODE_FILE."; send_telegram_message "❌ Ошибка: Не удалось скопировать ${ENV_NODE_FILE} для бэкапа." "None"; exit 1; }
-        if ! tar -czf "$BACKUP_DIR/$BACKUP_FILE_FINAL" -C "$BACKUP_DIR" "$BACKUP_FILE_DB" "$ENV_NODE_FILE"; then
-            STATUS=$?
-            echo "❌ Ошибка при архивировании бэкапа (включая $ENV_NODE_FILE). Код выхода: $STATUS"
-            send_telegram_message "❌ Ошибка при архивировании бэкапа (включая ${ENV_NODE_FILE}). Код выхода: ${STATUS}" "None"; exit $STATUS
-        fi
-        rm -f "$BACKUP_DIR/$ENV_NODE_FILE"
+        FILES_TO_ARCHIVE+=("$ENV_NODE_FILE")
     else
         echo "[INFO] Файл $ENV_NODE_FILE не найден по пути $ENV_NODE_PATH. Продолжаем без него."
-        if ! tar -czf "$BACKUP_DIR/$BACKUP_FILE_FINAL" -C "$BACKUP_DIR" "$BACKUP_FILE_DB"; then
-            STATUS=$?
-            echo "❌ Ошибка при архивировании бэкапа. Код выхода: $STATUS"
-            send_telegram_message "❌ Ошибка при архивировании бэкапа. Код выхода: ${STATUS}" "None"; exit $STATUS
-        fi
     fi
 
-    echo "[INFO] Очистка промежуточного дампа..."
+    if [ -f "$ENV_PATH" ]; then
+        echo "[INFO] Обнаружен файл $ENV_FILE. Добавляем его в архив."
+        cp "$ENV_PATH" "$BACKUP_DIR/" || { echo "❌ Ошибка при копировании $ENV_FILE."; send_telegram_message "❌ Ошибка: Не удалось скопировать ${ENV_FILE} для бэкапа." "None"; exit 1; }
+        FILES_TO_ARCHIVE+=("$ENV_FILE")
+    else
+        echo "[INFO] Файл $ENV_FILE не найден по пути $ENV_PATH. Продолжаем без него."
+    fi
+
+    # Архивируем все собранные файлы
+    if ! tar -czf "$BACKUP_DIR/$BACKUP_FILE_FINAL" -C "$BACKUP_DIR" "${FILES_TO_ARCHIVE[@]}"; then
+        STATUS=$?
+        echo "❌ Ошибка при архивировании бэкапа. Код выхода: $STATUS"
+        send_telegram_message "❌ Ошибка при архивировании бэкапа. Код выхода: ${STATUS}" "None"; exit $STATUS
+    fi
+
+    echo "[INFO] Очистка промежуточных файлов бэкапа..."
     rm -f "$BACKUP_DIR/$BACKUP_FILE_DB"
+    rm -f "$BACKUP_DIR/$ENV_NODE_FILE" # Убеждаемся, что временная копия удалена
+    rm -f "$BACKUP_DIR/$ENV_FILE" # НОВОЕ: Удаляем временную копию .env
 
     echo -e "${GREEN}✅ Бэкап успешно создан и находится по пути:\n $BACKUP_DIR/$BACKUP_FILE_FINAL${RESET}"
 
@@ -353,6 +366,7 @@ restore_backup() {
     echo -e ""
 
     ENV_NODE_RESTORE_PATH="$REMNALABS_ROOT_DIR/$ENV_NODE_FILE"
+    ENV_RESTORE_PATH="$REMNALABS_ROOT_DIR/$ENV_FILE" # НОВОЕ: Путь для восстановления .env
 
     echo "Доступные файлы бэкапов в $BACKUP_DIR:"
     # Улучшено: проверка на наличие файлов перед использованием find
@@ -454,6 +468,7 @@ restore_backup() {
         exit $STATUS
     fi
 
+    # НОВОЕ: Обработка .env-node и .env файлов при восстановлении
     if [ -f "$temp_restore_dir/$ENV_NODE_FILE" ]; then
         echo "[ИНФО] Обнаружен файл $ENV_NODE_FILE в архиве. Перемещаем его в $ENV_NODE_RESTORE_PATH."
         mv "$temp_restore_dir/$ENV_NODE_FILE" "$ENV_NODE_RESTORE_PATH" || { 
@@ -465,6 +480,19 @@ restore_backup() {
     else
         echo "[ИНФО] Файл $ENV_NODE_FILE не найден в архиве. Продолжаем без него."
     fi
+
+    if [ -f "$temp_restore_dir/$ENV_FILE" ]; then # НОВОЕ: Проверка и перемещение .env
+        echo "[ИНФО] Обнаружен файл $ENV_FILE в архиве. Перемещаем его в $ENV_RESTORE_PATH."
+        mv "$temp_restore_dir/$ENV_FILE" "$ENV_RESTORE_PATH" || { 
+            echo "❌ Ошибка при перемещении $ENV_FILE."
+            send_telegram_message "❌ Ошибка: Не удалось переместить ${ENV_FILE} при восстановлении." "None"
+            rm -rf "$temp_restore_dir" # Очистка
+            exit 1; 
+        }
+    else
+        echo "[ИНФО] Файл $ENV_FILE не найден в архиве. Продолжаем без него."
+    fi
+
 
     DUMP_FILE_GZ=$(find "$temp_restore_dir" -name "dump_*.sql.gz" | sort | tail -n 1)
 
@@ -538,7 +566,7 @@ restore_backup() {
 #    const superadmin = await prisma.admin.findFirst();
 #    if (!superadmin) {
 #      console.error("❌ Суперпользователь не найден.");
-#      // Не выходим с ошибкой, если суперпользователя просто нет
+#      # Не выходим с ошибкой, если суперпользователя просто нет
 #      process.exit(0); 
 #    }
 
