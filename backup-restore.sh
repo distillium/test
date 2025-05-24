@@ -60,12 +60,26 @@ install_dependencies() {
 load_or_create_config() {
     if [[ -f "$CONFIG_FILE" ]]; then
         echo "Загрузка конфигурации из $CONFIG_FILE..."
-        source "$CONFIG_FILE"
-        if [[ -z "$BOT_TOKEN" || -z "$CHAT_ID" || -z "$DB_USER" ]]; then
-            echo "В файле конфигурации отсутствуют необходимые переменные (BOT_TOKEN, CHAT_ID, DB_USER)."
-            echo "Пожалуйста, удалите $CONFIG_FILE и запустите скрипт снова для создания новой конфигурации."
-            exit 1
-        fi
+source "$CONFIG_FILE"
+
+if [[ -z "$BOT_TOKEN" || -z "$CHAT_ID" || -z "$DB_USER" ]]; then
+    echo "⚠️  В файле конфигурации отсутствуют необходимые переменные."
+    echo "▶️  Пожалуйста, введите недостающие данные:"
+
+    [[ -z "$BOT_TOKEN" ]] && read -rp "Введите Telegram Bot Token: " BOT_TOKEN
+    [[ -z "$CHAT_ID" ]] && read -rp "Введите Telegram Chat ID: " CHAT_ID
+    [[ -z "$DB_USER" ]] && read -rp "Введите имя пользователя PostgreSQL (по умолчанию postgres): " DB_USER
+    DB_USER=${DB_USER:-postgres}
+
+    cat > "$CONFIG_FILE" <<EOF
+BOT_TOKEN="$BOT_TOKEN"
+CHAT_ID="$CHAT_ID"
+DB_USER="$DB_USER"
+EOF
+
+    chmod 600 "$CONFIG_FILE" || { echo "Ошибка при установке прав доступа для $CONFIG_FILE."; exit 1; }
+    echo "✅ Конфигурация дополнена и сохранена в $CONFIG_FILE"
+fi
     else
         echo "=== Конфигурация не найдена, создаем новую ==="
         read -rp "Введите Telegram Bot Token: " BOT_TOKEN
