@@ -3,12 +3,14 @@
 set -e
 
 INSTALL_DIR="/opt/rw-backup-restore"
-BACKUP_DIR="$INSTALL_DIR/backup" # Изменено, чтобы соответствовать вашей переменной BACKUP_DIR
+BACKUP_DIR="$INSTALL_DIR/backup"
 CONFIG_FILE="$INSTALL_DIR/config.env"
 SCRIPT_NAME="backup-restore.sh"
 SCRIPT_PATH="$INSTALL_DIR/$SCRIPT_NAME"
 RETAIN_BACKUPS_DAYS=7
 SYMLINK_PATH="/usr/local/bin/rw-backup"
+REMNALABS_ROOT_DIR="/opt/remnawave"
+ENV_NODE_FILE="env-node"
 
 if [[ "$0" != "$SCRIPT_PATH" && ! -f "$SCRIPT_PATH" ]]; then
     echo "📥 Сохраняем скрипт в $SCRIPT_PATH..."
@@ -163,12 +165,10 @@ send_telegram_document() {
 create_backup() {
     echo "💾 Запись резервной копии..."
 
-    # CONTAINER_ID="remnawave-db" # уже задан по умолчанию
-    # DB_USER="postgres" # уже задан из конфига
-    # BACKUP_DIR="/opt/remnawave-backup" # уже задан в начале скрипта
     TIMESTAMP=$(date +%Y-%m-%d"_"%H_%M_%S)
     BACKUP_FILE_DB="dump_${TIMESTAMP}.sql.gz"
     BACKUP_FILE_FINAL="remnawave_backup_${TIMESTAMP}.tar.gz"
+    ENV_NODE_PATH="$REMNALABS_ROOT_DIR/$ENV_NODE_FILE"
 
     mkdir -p "$BACKUP_DIR" || { echo "Ошибка при создании каталога бэкапов $BACKUP_DIR."; send_telegram_message "❌ Ошибка: Не удалось создать каталог бэкапов $BACKUP_DIR." "None"; exit 1; }
 
@@ -185,10 +185,22 @@ create_backup() {
     fi
 
     echo "[INFO] Архивирование бэкапа..."
-    if ! tar -czf "$BACKUP_DIR/$BACKUP_FILE_FINAL" -C "$BACKUP_DIR" "$BACKUP_FILE_DB"; then
-        STATUS=$?
-        echo "❌ Ошибка при архивировании бэкапа. Код выхода: $STATUS"
-        send_telegram_message "❌ Ошибка при архивировании бэкапа. Код выхода: ${STATUS}" "None"; exit $STATUS
+    if [ -f "$ENV_NODE_PATH" ]; then
+        echo "[INFO] Обнаружен файл $ENV_NODE_FILE. Добавляем его в архив."
+        cp "$ENV_NODE_PATH" "$BACKUP_DIR/" || { echo "❌ Ошибка при копировании $ENV_NODE_FILE."; send_telegram_message "❌ Ошибка: Не удалось скопировать ${ENV_NODE_FILE} для бэкапа." "None"; exit 1; }
+        if ! tar -czf "$BACKUP_DIR/$BACKUP_FILE_FINAL" -C "$BACKUP_DIR" "$BACKUP_FILE_DB" "$ENV_NODE_FILE"; then
+            STATUS=$?
+            echo "❌ Ошибка при архивировании бэкапа (включая $ENV_NODE_FILE). Код выхода: $STATUS"
+            send_telegram_message "❌ Ошибка при архивировании бэкапа (включая ${ENV_NODE_FILE}). Код выхода: ${STATUS}" "None"; exit $STATUS
+        fi
+        rm -f "$BACKUP_DIR/$ENV_NODE_FILE"
+    else
+        echo "[INFO] Файл $ENV_NODE_FILE не найден по пути $ENV_NODE_PATH. Продолжаем без него."
+        if ! tar -czf "$BACKUP_DIR/$BACKUP_FILE_FINAL" -C "$BACKUP_DIR" "$BACKUP_FILE_DB"; then
+            STATUS=$?
+            echo "❌ Ошибка при архивировании бэкапа. Код выхода: $STATUS"
+            send_telegram_message "❌ Ошибка при архивировании бэкапа. Код выхода: ${STATUS}" "None"; exit $STATUS
+        fi
     fi
 
     echo "[INFO] Очистка промежуточного дампа..."
@@ -284,9 +296,7 @@ restore_backup() {
     echo -e "Убедитесь, что выбрали правильный файл бэкапа"
     echo -e ""
 
-    # CONTAINER_ID="remnawave-db" # уже задан по умолчанию
-    # DB_USER="postgres" # уже задан из конфига
-    # BACKUP_DIR="/opt/remnawave-backup" # уже задан в начале скрипта
+    ENV_NODE_RESTORE_PATH="$REMNALABS_ROOT_DIR/$ENV_NODE_FILE"
 
     echo "Доступные файлы бэкапов в $BACKUP_DIR:"
     BACKUP_FILES=("$BACKUP_DIR"/remnawave_backup_*.tar.gz)
@@ -344,7 +354,7 @@ restore_backup() {
         return
     fi
     echo "Ожидание запуска контейнера 'remnawave-db'..."
-    sleep 10 # Дождемся запуска БД
+    sleep 10
 
     if ! docker container inspect -f '{{.State.Running}}' remnawave-db 2>/dev/null | grep -q "true"; then
         echo "Критическая ошибка: Контейнер 'remnawave-db' все еще не запущен после попытки старта. Восстановление невозможно."
@@ -377,6 +387,13 @@ restore_backup() {
         send_telegram_message "❌ Ошибка при распаковке архива: ${SELECTED_BACKUP##*/}. Код выхода: ${STATUS}" "None"; exit $STATUS
     fi
 
+    if [ -f "$BACKUP_DIR/$ENV_NODE_FILE" ]; then
+        echo "[ИНФО] Обнаружен файл $ENV_NODE_FILE в архиве. Перемещаем его в $ENV_NODE_RESTORE_PATH."
+        mv "$BACKUP_DIR/$ENV_NODE_FILE" "$ENV_NODE_RESTORE_PATH" || { echo "❌ Ошибка при перемещении $ENV_NODE_FILE."; send_telegram_message "❌ Ошибка: Не удалось переместить ${ENV_NODE_FILE} при восстановлении." "None"; exit 1; }
+    else
+        echo "[ИНФО] Файл $ENV_NODE_FILE не найден в архиве. Продолжаем без него."
+    fi
+
     DUMP_FILE=$(find "$BACKUP_DIR" -name "dump_*.sql.gz" | sort | tail -n 1)
 
     if [ ! -f "$DUMP_FILE" ]; then
@@ -406,7 +423,7 @@ restore_backup() {
         local escaped_restore_success_prefix=$(escape_markdown_v2 "$restore_success_prefix")
         local final_restore_success_message="${escaped_restore_success_prefix}${restored_filename}"
         send_telegram_message "$final_restore_success_message" "MarkdownV2"
-        echo "[ИНФО] Удаление временного SQL-файла: $SQL_FILE"
+        echo "[ИНФО] Удаление временного SQL-файлов: $SQL_FILE"
         rm -f "$SQL_FILE"
     else
         STATUS=$?
@@ -427,12 +444,45 @@ restore_backup() {
         echo "Предупреждение: Не удалось остановить сервисы Docker Compose перед полным запуском."
     fi
 
-    # Запускаем все сервисы, кроме remnawave-db (он уже запущен)
     if ! docker compose up -d $(docker compose config --services | grep -v remnawave-db); then
         echo "Критическая ошибка: Не удалось запустить все сервисы Docker Compose после восстановления."
         return
     else
         echo "✅ Все сервисы Remnawave запущены."
+    fi
+
+    echo "[ИНФО] Сброс суперпользователя Remnawave..."
+    if ! docker exec -i remnawave node <<'EOF'
+const { PrismaClient } = require('@prisma/client');
+const prisma = new PrismaClient();
+
+(async () => {
+  try {
+    const superadmin = await prisma.admin.findFirst();
+    if (!superadmin) {
+      console.error("❌ Суперпользователь не найден.");
+      process.exit(1);
+    }
+
+    await prisma.admin.delete({
+      where: { uuid: superadmin.uuid },
+    });
+
+    console.log(`✅ Суперпользователь '${superadmin.username}' успешно удалён.`);
+  } catch (err) {
+    console.error("❌ Ошибка при удалении суперпользователя:", err);
+    process.exit(1);
+  } finally {
+    await prisma.$disconnect();
+  }
+})();
+EOF
+    then
+        echo "❌ Ошибка при сбросе суперпользователя."
+        send_telegram_message "❌ Ошибка при сбросе суперпользователя Remnawave." "None"
+    else
+        echo "✅ Суперпользователь успешно сброшен."
+        send_telegram_message "✅ Суперпользователь Remnawave успешно сброшен." "None"
     fi
 
     echo -e "\n--- Логи Remnawave ---"
