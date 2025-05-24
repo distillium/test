@@ -11,7 +11,7 @@ SCRIPT_PATH="$INSTALL_DIR/$SCRIPT_NAME" # Канонический путь к �
 RETAIN_BACKUPS_DAYS=7
 SYMLINK_PATH="/usr/local/bin/rw-backup"
 REMNALABS_ROOT_DIR="/opt/remnawave"
-ENV_NODE_FILE="env-node"
+ENV_NODE_FILE=".env-node"
 SCRIPT_REPO_URL="https://raw.githubusercontent.com/distillium/test/main/backup-restore.sh" # УРЛ для обновлений
 
 # --- Цвета и ASCII Art ---
@@ -683,7 +683,7 @@ main_menu() {
     while true; do
         clear
         print_ascii_art
-        echo "========= меню ========="
+        echo "========= Главное меню ========="
         echo "1) 💾 Сделать бэкап вручную"
         echo "2) ⏰ Настройка автоматической отправки и уведомлений"
         echo "3) ♻️ Восстановление из бэкапа"
