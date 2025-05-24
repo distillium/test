@@ -533,7 +533,7 @@ update_script() {
     rm "$SCRIPT_PATH"
     fi
     
-    if curl -fsSL https://raw.githubusercontent.com/distillium/remnawave-backup-restore/main/backup-restore.sh -o "$SCRIPT_PATH"; then
+    if curl -fsSL https://raw.githubusercontent.com/distillium/test/main/backup-restore.sh -o "$SCRIPT_PATH"; then
         chmod +x "$SCRIPT_PATH"
         echo "✅ Скрипт успешно обновлен."
         echo "♻️ Перезапуск скрипта..."
