@@ -593,6 +593,13 @@ update_script() {
             fi
 
             echo "🔬 Проверка загруженного скрипта: OK."
+
+# --- НОВОЕ ДОБАВЛЕНИЕ: Удаление старых бэкапов скрипта ---
+            echo "🗑️ Удаление старых резервных копий скрипта..."
+            find "$(dirname "$SCRIPT_PATH")" -maxdepth 1 -name "${SCRIPT_NAME}.bak.*" -type f -delete
+            echo -e "${GREEN}✅ Старые резервные копии скрипта удалены.${RESET}"
+            # --- КОНЕЦ НОВОГО ДОБАВЛЕНИЯ ---
+            
             BACKUP_PATH_SCRIPT="${SCRIPT_PATH}.bak.$(date +%s)"
             echo "Создание резервной копии текущего скрипта в $BACKUP_PATH_SCRIPT..."
             cp "$SCRIPT_PATH" "$BACKUP_PATH_SCRIPT" || {
