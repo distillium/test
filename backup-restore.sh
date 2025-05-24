@@ -10,7 +10,7 @@ SCRIPT_PATH="$INSTALL_DIR/$SCRIPT_NAME"
 RETAIN_BACKUPS_DAYS=7
 SYMLINK_PATH="/usr/local/bin/rw-backup"
 REMNALABS_ROOT_DIR="/opt/remnawave"
-ENV_NODE_FILE="env-node"
+ENV_NODE_FILE=".env-node"
 
 if [[ "$0" != "$SCRIPT_PATH" && ! -f "$SCRIPT_PATH" ]]; then
     echo "📥 Сохраняем скрипт в $SCRIPT_PATH..."
