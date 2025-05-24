@@ -525,20 +525,21 @@ fi
 update_script() {
     echo "🔄 Обновление скрипта..."
     BACKUP_PATH="${SCRIPT_PATH}.bak.$(date +%s)"
-    TEMP_SCRIPT_PATH="/tmp/${SCRIPT_NAME}.new"
-
     echo "Создание резервной копии текущего скрипта в $BACKUP_PATH..."
     cp "$SCRIPT_PATH" "$BACKUP_PATH" || { echo "❌ Не удалось создать резервную копию."; return; }
 
-    echo "Загрузка последней версии скрипта во временный файл..."
-    if curl -fsSL https://raw.githubusercontent.com/distillium/test/main/backup-restore.sh -o "$TEMP_SCRIPT_PATH"; then
-        chmod +x "$TEMP_SCRIPT_PATH"
-        echo "✅ Новая версия скрипта успешно загружена во временный файл."
-        echo "Перезапуск скрипта для применения изменений..."
-        # Запускаем новый скрипт и завершаем текущий
-        exec "$TEMP_SCRIPT_PATH" "$@" # Передаем все аргументы текущего скрипта новому
+    echo "Загрузка последней версии скрипта..."
+    if [ -f "$SCRIPT_PATH" ]; then
+    rm "$SCRIPT_PATH"
+    fi
+    
+    if curl -fsSL https://raw.githubusercontent.com/distillium/remnawave-backup-restore/main/backup-restore.sh -o "$SCRIPT_PATH"; then
+        chmod +x "$SCRIPT_PATH"
+        echo "✅ Скрипт успешно обновлен."
+        echo "♻️ Перезапуск скрипта..."
+        exec "$SCRIPT_PATH" "$@"
     else
-        echo "❌ Ошибка при загрузке новой версии. Сохраняем предыдущую версию."
+        echo "❌ Ошибка при загрузке новой версии. Восстанавливаем резервную копию..."
         mv "$BACKUP_PATH" "$SCRIPT_PATH"
         chmod +x "$SCRIPT_PATH"
         echo "✅ Восстановлена предыдущая версия скрипта."
