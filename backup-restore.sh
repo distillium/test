@@ -587,7 +587,6 @@ create_backup() {
                     print_message "SUCCESS" "Уведомление об успешной отправке на Google Drive отправлено в Telegram."
                 else
                     print_message "ERROR" "Не удалось отправить уведомление в Telegram после загрузки на Google Drive."
-                }
             fi
         fi
     fi
