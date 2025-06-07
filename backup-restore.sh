@@ -9,7 +9,7 @@ SCRIPT_NAME="backup-restore.sh"
 SCRIPT_PATH="$INSTALL_DIR/$SCRIPT_NAME"
 RETAIN_BACKUPS_DAYS=7
 SYMLINK_PATH="/usr/local/bin/rw-backup"
-REMNALABS_ROOT_DIR="/opt/remnawave"
+REMNALABS_ROOT_DIR="" # Изменено: теперь это переменная, которая будет заполнена
 ENV_NODE_FILE=".env-node"
 ENV_FILE=".env"
 SCRIPT_REPO_URL="https://raw.githubusercontent.com/distillium/remnawave-backup-restore/main/backup-restore.sh"
@@ -135,6 +135,7 @@ GD_CLIENT_SECRET="$GD_CLIENT_SECRET"
 GD_REFRESH_TOKEN="$GD_REFRESH_TOKEN"
 GD_FOLDER_ID="$GD_FOLDER_ID"
 CRON_TIMES="$CRON_TIMES"
+REMNALABS_ROOT_DIR="$REMNALABS_ROOT_DIR" # Добавлена новая переменная
 EOF
     chmod 600 "$CONFIG_FILE" || { print_message "ERROR" "Не удалось установить права доступа (600) для ${BOLD}${CONFIG_FILE}${RESET}. Проверьте разрешения."; exit 1; }
     print_message "SUCCESS" "Конфигурация сохранена."
@@ -152,6 +153,7 @@ load_or_create_config() {
         UPLOAD_METHOD=${UPLOAD_METHOD:-telegram}
         DB_USER=${DB_USER:-postgres}
         CRON_TIMES=${CRON_TIMES:-}
+        REMNALABS_ROOT_DIR=${REMNALABS_ROOT_DIR:-} # Инициализация переменной из конфига
         
         local config_updated=false
 
@@ -170,6 +172,26 @@ load_or_create_config() {
             config_updated=true
             echo ""
         fi
+
+        # Новый блок для выбора пути Remnawave
+        if [[ -z "$REMNALABS_ROOT_DIR" ]]; then
+            print_message "ACTION" "Где установлена ваша панель Remnawave?"
+            echo "   1) /opt/remnawave (рекомендуется)"
+            echo "   2) /root/remnawave"
+            echo ""
+            local remnawave_path_choice
+            while true; do
+                read -rp "   Выберите вариант (1 или 2): " remnawave_path_choice
+                case "$remnawave_path_choice" in
+                    1) REMNALABS_ROOT_DIR="/opt/remnawave"; break ;;
+                    2) REMNALABS_ROOT_DIR="/root/remnawave"; break ;;
+                    *) print_message "ERROR" "Неверный ввод. Пожалуйста, выберите 1 или 2." ;;
+                esac
+            done
+            config_updated=true
+            echo ""
+        fi
+
 
         if [[ "$UPLOAD_METHOD" == "google_drive" ]]; then
             if [[ -z "$GD_CLIENT_ID" || -z "$GD_CLIENT_SECRET" || -z "$GD_REFRESH_TOKEN" ]]; then
@@ -268,6 +290,22 @@ load_or_create_config() {
             echo ""
             read -rp "   Введите имя пользователя PostgreSQL (по умолчанию postgres): " DB_USER
             DB_USER=${DB_USER:-postgres}
+            echo ""
+
+            # Новый блок для выбора пути Remnawave при первой установке
+            print_message "ACTION" "Где установлена ваша панель Remnawave?"
+            echo "   1) /opt/remnawave (рекомендуется)"
+            echo "   2) /root/remnawave"
+            echo ""
+            local remnawave_path_choice
+            while true; do
+                read -rp "   Выберите вариант (1 или 2): " remnawave_path_choice
+                case "$remnawave_path_choice" in
+                    1) REMNALABS_ROOT_DIR="/opt/remnawave"; break ;;
+                    2) REMNALABS_ROOT_DIR="/root/remnawave"; break ;;
+                    *) print_message "ERROR" "Неверный ввод. Пожалуйста, выберите 1 или 2." ;;
+                esac
+            done
             echo ""
 
             mkdir -p "$INSTALL_DIR" || { print_message "ERROR" "Не удалось создать каталог установки ${BOLD}${INSTALL_DIR}${RESET}. Проверьте права доступа."; exit 1; }
@@ -1200,6 +1238,7 @@ configure_settings() {
         echo "   1) Изменить настройки Telegram"
         echo "   2) Изменить настройки Google Drive"
         echo "   3) Изменить имя пользователя PostgreSQL"
+        echo "   4) Изменить путь установки Remnawave" # Новый пункт
         echo "   0) Вернуться в главное меню"
         echo ""
         read -rp "Выберите пункт: " choice
@@ -1344,6 +1383,31 @@ configure_settings() {
                 DB_USER="${NEW_DB_USER:-postgres}"
                 save_config
                 print_message "SUCCESS" "Имя пользователя PostgreSQL успешно обновлено на ${BOLD}${DB_USER}${RESET}."
+                echo ""
+                read -rp "Нажмите Enter для продолжения..."
+                ;;
+            4) # Новый обработчик для изменения REMNALABS_ROOT_DIR
+                clear
+                print_ascii_art
+                echo "=== Изменить путь установки Remnawave ==="
+                echo ""
+                print_message "INFO" "Текущий путь Remnawave: ${BOLD}${REMNALABS_ROOT_DIR}${RESET}"
+                echo ""
+                print_message "ACTION" "Выберите новый путь для панели Remnawave:"
+                echo "   1) /opt/remnawave"
+                echo "   2) /root/remnawave"
+                echo ""
+                local new_remnawave_path_choice
+                while true; do
+                    read -rp "   Выберите вариант (1 или 2): " new_remnawave_path_choice
+                    case "$new_remnawave_path_choice" in
+                        1) REMNALABS_ROOT_DIR="/opt/remnawave"; break ;;
+                        2) REMNALABS_ROOT_DIR="/root/remnawave"; break ;;
+                        *) print_message "ERROR" "Неверный ввод. Пожалуйста, выберите 1 или 2." ;;
+                    esac
+                done
+                save_config
+                print_message "SUCCESS" "Путь установки Remnawave успешно обновлен на ${BOLD}${REMNALABS_ROOT_DIR}${RESET}."
                 echo ""
                 read -rp "Нажмите Enter для продолжения..."
                 ;;
