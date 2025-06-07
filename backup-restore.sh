@@ -9,7 +9,7 @@ SCRIPT_NAME="backup-restore.sh"
 SCRIPT_PATH="$INSTALL_DIR/$SCRIPT_NAME"
 RETAIN_BACKUPS_DAYS=7
 SYMLINK_PATH="/usr/local/bin/rw-backup"
-REMNALABS_ROOT_DIR="" # Изменено: теперь это переменная, которая будет заполнена
+REMNALABS_ROOT_DIR=""
 ENV_NODE_FILE=".env-node"
 ENV_FILE=".env"
 SCRIPT_REPO_URL="https://raw.githubusercontent.com/distillium/remnawave-backup-restore/main/backup-restore.sh"
@@ -153,7 +153,7 @@ load_or_create_config() {
         UPLOAD_METHOD=${UPLOAD_METHOD:-telegram}
         DB_USER=${DB_USER:-postgres}
         CRON_TIMES=${CRON_TIMES:-}
-        REMNALABS_ROOT_DIR=${REMNALABS_ROOT_DIR:-} # Инициализация переменной из конфига
+        REMNALABS_ROOT_DIR=${REMNALABS_ROOT_DIR:-}
         
         local config_updated=false
 
@@ -173,10 +173,9 @@ load_or_create_config() {
             echo ""
         fi
 
-        # Новый блок для выбора пути Remnawave
         if [[ -z "$REMNALABS_ROOT_DIR" ]]; then
-            print_message "ACTION" "Где установлена ваша панель Remnawave?"
-            echo "   1) /opt/remnawave (рекомендуется)"
+            print_message "ACTION" "Где установлена/устанавливается ваша панель Remnawave?"
+            echo "   1) /opt/remnawave"
             echo "   2) /root/remnawave"
             echo ""
             local remnawave_path_choice
@@ -292,9 +291,8 @@ load_or_create_config() {
             DB_USER=${DB_USER:-postgres}
             echo ""
 
-            # Новый блок для выбора пути Remnawave при первой установке
-            print_message "ACTION" "Где установлена ваша панель Remnawave?"
-            echo "   1) /opt/remnawave (рекомендуется)"
+            print_message "ACTION" "Где установлена/устанавливается ваша панель Remnawave?"
+            echo "   1) /opt/remnawave"
             echo "   2) /root/remnawave"
             echo ""
             local remnawave_path_choice
@@ -1238,7 +1236,7 @@ configure_settings() {
         echo "   1) Изменить настройки Telegram"
         echo "   2) Изменить настройки Google Drive"
         echo "   3) Изменить имя пользователя PostgreSQL"
-        echo "   4) Изменить путь установки Remnawave" # Новый пункт
+        echo "   4) Изменить путь Remnawave"
         echo "   0) Вернуться в главное меню"
         echo ""
         read -rp "Выберите пункт: " choice
@@ -1386,10 +1384,10 @@ configure_settings() {
                 echo ""
                 read -rp "Нажмите Enter для продолжения..."
                 ;;
-            4) # Новый обработчик для изменения REMNALABS_ROOT_DIR
+            4)
                 clear
                 print_ascii_art
-                echo "=== Изменить путь установки Remnawave ==="
+                echo "=== Изменить путь Remnawave ==="
                 echo ""
                 print_message "INFO" "Текущий путь Remnawave: ${BOLD}${REMNALABS_ROOT_DIR}${RESET}"
                 echo ""
@@ -1407,7 +1405,7 @@ configure_settings() {
                     esac
                 done
                 save_config
-                print_message "SUCCESS" "Путь установки Remnawave успешно обновлен на ${BOLD}${REMNALABS_ROOT_DIR}${RESET}."
+                print_message "SUCCESS" "Путь Remnawave успешно обновлен на ${BOLD}${REMNALABS_ROOT_DIR}${RESET}."
                 echo ""
                 read -rp "Нажмите Enter для продолжения..."
                 ;;
