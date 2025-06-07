@@ -20,6 +20,7 @@ GD_REFRESH_TOKEN=""
 GD_FOLDER_ID=""
 UPLOAD_METHOD="telegram"
 CRON_TIMES=""
+VERSION="1.0.2"
 
 if [[ -t 0 ]]; then
     RED="\e[31m"
