@@ -9,8 +9,7 @@ SCRIPT_NAME="backup-restore.sh"
 SCRIPT_PATH="$INSTALL_DIR/$SCRIPT_NAME"
 RETAIN_BACKUPS_DAYS=7
 SYMLINK_PATH="/usr/local/bin/rw-backup"
-REMNALABS_ROOT_DIR_DEFAULT="/opt/remnawave"
-REMNALABS_ROOT_DIR=""
+REMNALABS_ROOT_DIR="/opt/remnawave"
 ENV_NODE_FILE=".env-node"
 ENV_FILE=".env"
 SCRIPT_REPO_URL="https://raw.githubusercontent.com/distillium/remnawave-backup-restore/main/backup-restore.sh"
@@ -136,7 +135,6 @@ GD_CLIENT_SECRET="$GD_CLIENT_SECRET"
 GD_REFRESH_TOKEN="$GD_REFRESH_TOKEN"
 GD_FOLDER_ID="$GD_FOLDER_ID"
 CRON_TIMES="$CRON_TIMES"
-REMNALABS_ROOT_DIR="$REMNALABS_ROOT_DIR"
 EOF
     chmod 600 "$CONFIG_FILE" || { print_message "ERROR" "Не удалось установить права доступа (600) для ${BOLD}${CONFIG_FILE}${RESET}. Проверьте разрешения."; exit 1; }
     print_message "SUCCESS" "Конфигурация сохранена."
@@ -154,34 +152,8 @@ load_or_create_config() {
         UPLOAD_METHOD=${UPLOAD_METHOD:-telegram}
         DB_USER=${DB_USER:-postgres}
         CRON_TIMES=${CRON_TIMES:-}
-        REMNALABS_ROOT_DIR=${REMNALABS_ROOT_DIR:-$REMNALABS_ROOT_DIR_DEFAULT}
         
         local config_updated=false
-
-        if [[ -z "$REMNALABS_ROOT_DIR" || ("$REMNALABS_ROOT_DIR" != "/opt/remnawave" && "$REMNALABS_ROOT_DIR" != "/root/remnawave") ]]; then
-            print_message "ACTION" "Где установлена/устанавливается ваша панель Remnawave?"
-            echo ""
-            select rw_path_choice in "/opt/remnawave" "/root/remnawave"; do
-                case $rw_path_choice in
-                    "/opt/remnawave")
-                        REMNALABS_ROOT_DIR="/opt/remnawave"
-                        print_message "SUCCESS" "Выбран путь: ${BOLD}/opt/remnawave${RESET}"
-                        break
-                        ;;
-                    "/root/remnawave")
-                        REMNALABS_ROOT_DIR="/root/remnawave"
-                        print_message "SUCCESS" "Выбран путь: ${BOLD}/root/remnawave${RESET}"
-                        break
-                        ;;
-                    *)
-                        print_message "ERROR" "Неверный выбор. Пожалуйста, выберите 1 или 2."
-                        ;;
-                esac
-            done
-            config_updated=true
-            echo ""
-        fi
-
 
         if [[ -z "$BOT_TOKEN" || -z "$CHAT_ID" || -z "$DB_USER" ]]; then
             print_message "WARN" "В файле конфигурации отсутствуют необходимые переменные для Telegram."
@@ -288,28 +260,6 @@ load_or_create_config() {
         else
             print_message "INFO" "Конфигурация не найдена, создаем новую..."
             echo ""
-            
-            print_message "ACTION" "Где установлена/устанавливается ваша панель Remnawave?"
-            echo ""
-            select rw_path_choice in "/opt/remnawave" "/root/remnawave"; do
-                case $rw_path_choice in
-                    "/opt/remnawave")
-                        REMNALABS_ROOT_DIR="/opt/remnawave"
-                        print_message "SUCCESS" "Выбран путь: ${BOLD}/opt/remnawave${RESET}"
-                        break
-                        ;;
-                    "/root/remnawave")
-                        REMNALABS_ROOT_DIR="/root/remnawave"
-                        print_message "SUCCESS" "Выбран путь: ${BOLD}/root/remnawave${RESET}"
-                        break
-                        ;;
-                    *)
-                        print_message "ERROR" "Неверный выбор. Пожалуйста, выберите 1 или 2."
-                        ;;
-                esac
-            done
-            echo ""
-
             print_message "INFO" "Создайте Telegram бота в ${CYAN}@BotFather${RESET} и получите API Token"
             read -rp "   Введите API Token: " BOT_TOKEN
             echo ""
@@ -587,9 +537,31 @@ create_backup() {
                     print_message "SUCCESS" "Уведомление об успешной отправке на Google Drive отправлено в Telegram."
                 else
                     print_message "ERROR" "Не удалось отправить уведомление в Telegram после загрузки на Google Drive."
+                fi
+            else
+                echo -e "${RED}❌ Ошибка при отправке бэкапа в Google Drive. Проверьте настройки Google Drive API.${RESET}"
+                send_telegram_message "❌ Ошибка: Не удалось отправить бэкап в Google Drive. Подробности в логах сервера." "None"
             fi
+        else
+            print_message "WARN" "Неизвестный метод отправки: ${BOLD}${UPLOAD_METHOD}${RESET}. Бэкап не отправлен."
+            send_telegram_message "❌ Ошибка: Неизвестный метод отправки бэкапа: ${BOLD}${UPLOAD_METHOD}${RESET}. Файл: ${BOLD}${BACKUP_FILE_FINAL}${RESET} не отправлен." "None"
         fi
+    else
+        echo -e "${RED}❌ Ошибка: Финальный файл бэкапа не найден после создания: ${BOLD}${BACKUP_DIR}/${BACKUP_FILE_FINAL}${RESET}. Отправка невозможна.${RESET}"
+        local error_msg="❌ Ошибка: Файл бэкапа не найден после создания: ${BOLD}${BACKUP_FILE_FINAL}${RESET}"
+        if [[ "$UPLOAD_METHOD" == "telegram" ]]; then
+            send_telegram_message "$error_msg" "None"
+        elif [[ "$UPLOAD_METHOD" == "google_drive" ]]; then
+            print_message "ERROR" "Отправка в Google Drive невозможна: файл бэкапа не найден."
+        fi
+        exit 1
     fi
+    echo ""
+
+    print_message "INFO" "Применение политики хранения бэкапов (оставляем за последние ${BOLD}${RETAIN_BACKUPS_DAYS}${RESET} дней)..."
+    find "$BACKUP_DIR" -maxdepth 1 -name "remnawave_backup_*.tar.gz" -mtime +$RETAIN_BACKUPS_DAYS -delete
+    print_message "SUCCESS" "Политика хранения применена. Старые бэкапы удалены."
+    echo ""
 }
 
 setup_auto_send() {
@@ -805,10 +777,6 @@ restore_backup() {
     echo ""
 
     print_message "INFO" "Остановка контейнеров и удаление тома базы данных..."
-    if [[ ! -d "$REMNALABS_ROOT_DIR" ]]; then
-        print_message "ERROR" "Ошибка: Каталог ${BOLD}${REMNALABS_ROOT_DIR}${RESET} не найден. Проверьте, правильно ли указан путь к установке Remnawave."
-        return
-    fi
     if ! cd "$REMNALABS_ROOT_DIR"; then
         print_message "ERROR" "Ошибка: Не удалось перейти в каталог ${BOLD}${REMNALABS_ROOT_DIR}${RESET}. Убедитесь, что файл ${BOLD}docker-compose.yml${RESET} находится там."
         return
@@ -883,7 +851,6 @@ restore_backup() {
 
     if [ -f "$temp_restore_dir/$ENV_NODE_FILE" ]; then
         print_message "INFO" "  Обнаружен файл ${BOLD}${ENV_NODE_FILE}${RESET} в архиве. Перемещаем его в ${BOLD}${ENV_NODE_RESTORE_PATH}${RESET}."
-        mkdir -p "$(dirname "$ENV_NODE_RESTORE_PATH")"
         mv "$temp_restore_dir/$ENV_NODE_FILE" "$ENV_NODE_RESTORE_PATH" || {
             echo -e "${RED}❌ Ошибка при перемещении ${BOLD}${ENV_NODE_FILE}${RESET}. Проверьте права доступа.${RESET}"
             if [[ "$UPLOAD_METHOD" == "telegram" ]]; then send_telegram_message "❌ Ошибка: Не удалось переместить ${BOLD}${ENV_NODE_FILE}${RESET} при восстановлении." "None"; fi
@@ -897,7 +864,6 @@ restore_backup() {
 
     if [ -f "$temp_restore_dir/$ENV_FILE" ]; then
         print_message "INFO" "  Обнаружен файл ${BOLD}${ENV_FILE}${RESET} в архиве. Перемещаем его в ${BOLD}${ENV_RESTORE_PATH}${RESET}."
-        mkdir -p "$(dirname "$ENV_RESTORE_PATH")"
         mv "$temp_restore_dir/$ENV_FILE" "$ENV_RESTORE_PATH" || {
             echo -e "${RED}❌ Ошибка при перемещении ${BOLD}${ENV_FILE}${RESET}. Проверьте права доступа.${RESET}"
             if [[ "$UPLOAD_METHOD" == "telegram" ]]; then send_telegram_message "❌ Ошибка: Не удалось переместить ${BOLD}${ENV_FILE}${RESET} при восстановлении." "None"; fi
@@ -988,11 +954,6 @@ restore_backup() {
     print_message "INFO" "Перезапуск всех сервисов ${BOLD}Remnawave${RESET} и вывод логов..."
     if ! docker compose down; then
         print_message "WARN" "Предупреждение: Не удалось остановить сервисы Docker Compose перед полным запуском. Возможно, некоторые уже остановлены."
-    fi
-    
-    if ! cd "$REMNALABS_ROOT_DIR"; then
-        print_message "ERROR" "Ошибка: Не удалось перейти в каталог ${BOLD}${REMNALABS_ROOT_DIR}${RESET}. Перезапуск сервисов не выполнен."
-        return
     fi
 
     if ! docker compose up -d; then
@@ -1239,7 +1200,6 @@ configure_settings() {
         echo "   1) Изменить настройки Telegram"
         echo "   2) Изменить настройки Google Drive"
         echo "   3) Изменить имя пользователя PostgreSQL"
-        echo "   4) Изменить путь до Remnawave"
         echo "   0) Вернуться в главное меню"
         echo ""
         read -rp "Выберите пункт: " choice
@@ -1384,34 +1344,6 @@ configure_settings() {
                 DB_USER="${NEW_DB_USER:-postgres}"
                 save_config
                 print_message "SUCCESS" "Имя пользователя PostgreSQL успешно обновлено на ${BOLD}${DB_USER}${RESET}."
-                echo ""
-                read -rp "Нажмите Enter для продолжения..."
-                ;;
-            4)
-                clear
-                print_ascii_art
-                echo "=== Изменить путь Remnawave ==="
-                echo ""
-                print_message "INFO" "Текущий путь Remnawave: ${BOLD}${REMNALABS_ROOT_DIR}${RESET}"
-                echo ""
-                select new_rw_path_choice in "/opt/remnawave" "/root/remnawave"; do
-                    case $new_rw_path_choice in
-                        "/opt/remnawave")
-                            REMNALABS_ROOT_DIR="/opt/remnawave"
-                            print_message "SUCCESS" "Путь Remnawave обновлен на: ${BOLD}/opt/remnawave${RESET}"
-                            break
-                            ;;
-                        "/root/remnawave")
-                            REMNALABS_ROOT_DIR="/root/remnawave"
-                            print_message "SUCCESS" "Путь Remnawave обновлен на: ${BOLD}/root/remnawave${RESET}"
-                            break
-                            ;;
-                        *)
-                            print_message "ERROR" "Неверный выбор. Пожалуйста, выберите 1 или 2."
-                            ;;
-                    esac
-                done
-                save_config
                 echo ""
                 read -rp "Нажмите Enter для продолжения..."
                 ;;
