@@ -9,11 +9,8 @@ SCRIPT_NAME="backup-restore.sh"
 SCRIPT_PATH="$INSTALL_DIR/$SCRIPT_NAME"
 RETAIN_BACKUPS_DAYS=7
 SYMLINK_PATH="/usr/local/bin/rw-backup"
-
-# Изначальное значение по умолчанию, которое будет перезаписано выбором пользователя
 REMNALABS_ROOT_DIR_DEFAULT="/opt/remnawave"
-REMNALABS_ROOT_DIR="" # Эта переменная будет хранить окончательный выбранный путь
-
+REMNALABS_ROOT_DIR=""
 ENV_NODE_FILE=".env-node"
 ENV_FILE=".env"
 SCRIPT_REPO_URL="https://raw.githubusercontent.com/distillium/remnawave-backup-restore/main/backup-restore.sh"
@@ -157,11 +154,10 @@ load_or_create_config() {
         UPLOAD_METHOD=${UPLOAD_METHOD:-telegram}
         DB_USER=${DB_USER:-postgres}
         CRON_TIMES=${CRON_TIMES:-}
-        REMNALABS_ROOT_DIR=${REMNALABS_ROOT_DIR:-$REMNALABS_ROOT_DIR_DEFAULT} # Установка значения по умолчанию, если не задано
+        REMNALABS_ROOT_DIR=${REMNALABS_ROOT_DIR:-$REMNALABS_ROOT_DIR_DEFAULT}
         
         local config_updated=false
 
-        # Запрос пути Remnawave, если он не установлен
         if [[ -z "$REMNALABS_ROOT_DIR" || ("$REMNALABS_ROOT_DIR" != "/opt/remnawave" && "$REMNALABS_ROOT_DIR" != "/root/remnawave") ]]; then
             print_message "ACTION" "Где установлена/устанавливается ваша панель Remnawave?"
             echo ""
@@ -271,7 +267,7 @@ load_or_create_config() {
             print_message "SUCCESS" "Конфигурация успешно загружена из ${BOLD}${CONFIG_FILE}${RESET}."
         fi
 
-    else # Если CONFIG_FILE не существует, это первая установка
+    else
         if [[ "$SCRIPT_RUN_PATH" != "$SCRIPT_PATH" ]]; then
             print_message "INFO" "Конфигурация не найдена. Скрипт запущен из временного расположения."
             print_message "INFO" "Перемещаем скрипт в основной каталог установки: ${BOLD}${SCRIPT_PATH}${RESET}..."
@@ -293,7 +289,6 @@ load_or_create_config() {
             print_message "INFO" "Конфигурация не найдена, создаем новую..."
             echo ""
             
-            # Новый запрос на путь Remnawave при первой настройке
             print_message "ACTION" "Где установлена/устанавливается ваша панель Remnawave?"
             echo ""
             select rw_path_choice in "/opt/remnawave" "/root/remnawave"; do
@@ -647,7 +642,6 @@ create_backup() {
     TIMESTAMP=$(date +%Y-%m-%d"_"%H_%M_%S)
     BACKUP_FILE_DB="dump_${TIMESTAMP}.sql.gz"
     BACKUP_FILE_FINAL="remnawave_backup_${TIMESTAMP}.tar.gz"
-    # Теперь ENV_NODE_PATH и ENV_PATH используют динамический REMNALABS_ROOT_DIR
     ENV_NODE_PATH="$REMNALABS_ROOT_DIR/$ENV_NODE_FILE"
     ENV_PATH="$REMNALABS_ROOT_DIR/$ENV_FILE"
 
@@ -921,7 +915,6 @@ restore_backup() {
     print_message "WARN" "Восстановление полностью перезапишет базу данных ${BOLD}Remnawave${RESET}"
     echo -e "Поместите файл бэкапа (${BOLD}*.tar.gz${RESET}) в папку: ${BOLD}${BACKUP_DIR}${RESET}"
 
-    # Теперь ENV_NODE_RESTORE_PATH и ENV_RESTORE_PATH используют динамический REMNALABS_ROOT_DIR
     ENV_NODE_RESTORE_PATH="$REMNALABS_ROOT_DIR/$ENV_NODE_FILE"
     ENV_RESTORE_PATH="$REMNALABS_ROOT_DIR/$ENV_FILE"
 
@@ -989,7 +982,6 @@ restore_backup() {
     echo ""
 
     print_message "INFO" "Остановка контейнеров и удаление тома базы данных..."
-    # Проверка существования директории перед cd
     if [[ ! -d "$REMNALABS_ROOT_DIR" ]]; then
         print_message "ERROR" "Ошибка: Каталог ${BOLD}${REMNALABS_ROOT_DIR}${RESET} не найден. Проверьте, правильно ли указан путь к установке Remnawave."
         return
@@ -1068,7 +1060,6 @@ restore_backup() {
 
     if [ -f "$temp_restore_dir/$ENV_NODE_FILE" ]; then
         print_message "INFO" "  Обнаружен файл ${BOLD}${ENV_NODE_FILE}${RESET} в архиве. Перемещаем его в ${BOLD}${ENV_NODE_RESTORE_PATH}${RESET}."
-        # Убедимся, что целевая директория существует
         mkdir -p "$(dirname "$ENV_NODE_RESTORE_PATH")"
         mv "$temp_restore_dir/$ENV_NODE_FILE" "$ENV_NODE_RESTORE_PATH" || {
             echo -e "${RED}❌ Ошибка при перемещении ${BOLD}${ENV_NODE_FILE}${RESET}. Проверьте права доступа.${RESET}"
@@ -1083,7 +1074,6 @@ restore_backup() {
 
     if [ -f "$temp_restore_dir/$ENV_FILE" ]; then
         print_message "INFO" "  Обнаружен файл ${BOLD}${ENV_FILE}${RESET} в архиве. Перемещаем его в ${BOLD}${ENV_RESTORE_PATH}${RESET}."
-        # Убедимся, что целевая директория существует
         mkdir -p "$(dirname "$ENV_RESTORE_PATH")"
         mv "$temp_restore_dir/$ENV_FILE" "$ENV_RESTORE_PATH" || {
             echo -e "${RED}❌ Ошибка при перемещении ${BOLD}${ENV_FILE}${RESET}. Проверьте права доступа.${RESET}"
@@ -1176,7 +1166,7 @@ restore_backup() {
     if ! docker compose down; then
         print_message "WARN" "Предупреждение: Не удалось остановить сервисы Docker Compose перед полным запуском. Возможно, некоторые уже остановлены."
     fi
-    # Переходим в выбранную директорию Remnawave перед запуском docker compose up
+    
     if ! cd "$REMNALABS_ROOT_DIR"; then
         print_message "ERROR" "Ошибка: Не удалось перейти в каталог ${BOLD}${REMNALABS_ROOT_DIR}${RESET}. Перезапуск сервисов не выполнен."
         return
@@ -1426,7 +1416,7 @@ configure_settings() {
         echo "   1) Изменить настройки Telegram"
         echo "   2) Изменить настройки Google Drive"
         echo "   3) Изменить имя пользователя PostgreSQL"
-        echo "   4) Изменить путь установки Remnawave" # Новый пункт
+        echo "   4) Изменить путь до Remnawave"
         echo "   0) Вернуться в главное меню"
         echo ""
         read -rp "Выберите пункт: " choice
@@ -1574,23 +1564,23 @@ configure_settings() {
                 echo ""
                 read -rp "Нажмите Enter для продолжения..."
                 ;;
-            4) # Новый пункт меню для изменения пути Remnawave
+            4)
                 clear
                 print_ascii_art
-                echo "=== Изменить путь установки Remnawave ==="
+                echo "=== Изменить путь Remnawave ==="
                 echo ""
-                print_message "INFO" "Текущий путь установки Remnawave: ${BOLD}${REMNALABS_ROOT_DIR}${RESET}"
+                print_message "INFO" "Текущий путь Remnawave: ${BOLD}${REMNALABS_ROOT_DIR}${RESET}"
                 echo ""
                 select new_rw_path_choice in "/opt/remnawave" "/root/remnawave"; do
                     case $new_rw_path_choice in
                         "/opt/remnawave")
                             REMNALABS_ROOT_DIR="/opt/remnawave"
-                            print_message "SUCCESS" "Путь установки Remnawave обновлен на: ${BOLD}/opt/remnawave${RESET}"
+                            print_message "SUCCESS" "Путь Remnawave обновлен на: ${BOLD}/opt/remnawave${RESET}"
                             break
                             ;;
                         "/root/remnawave")
                             REMNALABS_ROOT_DIR="/root/remnawave"
-                            print_message "SUCCESS" "Путь установки Remnawave обновлен на: ${BOLD}/root/remnawave${RESET}"
+                            print_message "SUCCESS" "Путь Remnawave обновлен на: ${BOLD}/root/remnawave${RESET}"
                             break
                             ;;
                         *)
