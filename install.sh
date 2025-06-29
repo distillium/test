@@ -135,13 +135,17 @@ printf "${COLOR_LABEL}%-22s${COLOR_YELLOW}%s${RESET}\n" "External IP:" "$EXTERNA
 }
 
 [ "$SHOW_FIREWALL" = true ] && {
-  echo -e "\n${COLOR_TITLE}=== Firewall ===${RESET}"
-  if command -v ufw &>/dev/null; then
-    STATUS=$(ufw status | head -1)
-    printf "${COLOR_LABEL}%-22s${COLOR_VALUE}%s${RESET}\n" "UFW Status:" "$STATUS"
-  else
-    printf "${COLOR_LABEL}%-22s${COLOR_VALUE}%s${RESET}\n" "UFW:" "not installed"
-  fi
+  echo -e "\n${COLOR_TITLE}=== Firewall ===${RESET}"
+  if command -v ufw &>/dev/null; then
+    STATUS=$(ufw status | head -1 | awk '{print $2}')
+    if [ "$STATUS" = "active" ]; then
+      printf "${COLOR_LABEL}%-22s${COLOR_GREEN}%s${RESET}\n" "UFW Status:" "$STATUS"
+    else
+      printf "${COLOR_LABEL}%-22s${COLOR_RED}%s${RESET}\n" "UFW Status:" "$STATUS"
+    fi
+  else
+    printf "${COLOR_LABEL}%-22s${COLOR_VALUE}%s${RESET}\n" "UFW:" "not installed"
+  fi
 }
 
 [ "$SHOW_DOCKER" = true ] && {
