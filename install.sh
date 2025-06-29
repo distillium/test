@@ -28,6 +28,10 @@ source /etc/rw-motd.conf
 COLOR_TITLE="\e[1;37m"
 COLOR_LABEL="\e[0;36m"
 COLOR_VALUE="\e[0;37m"
+COLOR_GREEN="\e[0;32m"
+COLOR_RED="\e[0;31m"
+COLOR_YELLOW="\e[0;33m"
+BOLD="\e[1m"
 RESET="\e[0m"
 
 bar() {
@@ -61,7 +65,7 @@ LAST_DATE=$(echo "$LAST_LOGIN" | awk '{print $4, $5, $6, $7}')
 LAST_IP=$(echo "$LAST_LOGIN" | awk '{print $3}')
 
 echo -e "${COLOR_TITLE}=== Session Info ===${RESET}"
-printf "${COLOR_LABEL}%-22s${COLOR_VALUE}%s${RESET}\n" "Last login:" "$LAST_DATE from $LAST_IP"
+printf "${COLOR_LABEL}%-22s${COLOR_VALUE}%s ${COLOR_YELLOW}from $LAST_IP${RESET}\n" "Last login:" "$LAST_DATE"
 printf "${COLOR_LABEL}%-22s${COLOR_VALUE}%s${RESET}\n" "User:" "$(whoami)"
 printf "${COLOR_LABEL}%-22s${COLOR_VALUE}%s${RESET}\n" "Uptime:" "$(uptime -p | sed 's/up //')"
 
@@ -69,7 +73,8 @@ echo -e "\n${COLOR_TITLE}=== System Info ===${RESET}"
 printf "${COLOR_LABEL}%-22s${COLOR_VALUE}%s${RESET}\n" "Hostname:" "$(hostname)"
 printf "${COLOR_LABEL}%-22s${COLOR_VALUE}%s${RESET}\n" "OS:" "$(lsb_release -ds 2>/dev/null || grep PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '\"')"
 printf "${COLOR_LABEL}%-22s${COLOR_VALUE}%s${RESET}\n" "Kernel:" "$(uname -r)"
-printf "${COLOR_LABEL}%-22s${COLOR_VALUE}%s${RESET}\n" "External IP:" "$(hostname -I | awk '{print $1}')"
+EXTERNAL_IP="$(hostname -I | awk '{print $1}')"
+printf "${COLOR_LABEL}%-22s${COLOR_YELLOW}%s${RESET}\n" "External IP:" "$EXTERNAL_IP"
 
 [ "$SHOW_CPU" = true ] && {
   echo -e "\n${COLOR_TITLE}=== CPU ===${RESET}"
