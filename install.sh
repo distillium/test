@@ -2,11 +2,11 @@
 
 set -e
 
-echo "Installing dependencies..."
+echo "🛠️ Installing dependencies..."
 apt-get update -qq
 apt-get install -y toilet figlet procps lsb-release whiptail > /dev/null
 
-echo "Creating MOTD config..."
+echo "📁 Creating MOTD config..."
 CONFIG_FILE="/etc/rw-motd.conf"
 cat <<EOF > "$CONFIG_FILE"
 SHOW_LOGO=true
@@ -17,7 +17,7 @@ SHOW_DOCKER=true
 SHOW_FIREWALL=true
 EOF
 
-echo "Installing main MOTD script..."
+echo "📜 Installing main MOTD script..."
 mkdir -p /etc/update-motd.d
 
 cat << 'EOF' > /etc/update-motd.d/00-remnawave
@@ -28,15 +28,31 @@ source /etc/rw-motd.conf
 COLOR_TITLE="\e[1;37m"
 COLOR_LABEL="\e[0;36m"
 COLOR_VALUE="\e[0;37m"
-COLOR_GREEN="\e[0;32m"
-COLOR_RED="\e[0;31m"
-COLOR_YELLOW="\e[0;33m"
 RESET="\e[0m"
 
+bar() {
+  local USED=$1
+  local TOTAL=$2
+  local WIDTH=30
+  local PERCENT=$((100 * USED / TOTAL))
+  local FILLED=$((WIDTH * USED / TOTAL))
+  local EMPTY=$((WIDTH - FILLED))
+  local COLOR
+
+  if [ $PERCENT -lt 50 ]; then COLOR="\e[0;32m"   # Green
+  elif [ $PERCENT -lt 80 ]; then COLOR="\e[1;33m" # Yellow
+  else COLOR="\e[1;31m"                           # Red
+  fi
+
+  printf "["
+  for ((i=0; i<FILLED; i++)); do printf "${COLOR}━"; done
+  for ((i=0; i<EMPTY; i++)); do printf "${RESET}━"; done
+  printf "${RESET}] %d%%" "$PERCENT"
+}
+
 [ "$SHOW_LOGO" = true ] && {
-  clear
   echo -e "${COLOR_TITLE}"
-  toilet -f standard "remnawave"
+  toilet -f standard -F metal "remnawave"
   echo -e "${RESET}"
 }
 
@@ -45,7 +61,7 @@ LAST_DATE=$(echo "$LAST_LOGIN" | awk '{print $4, $5, $6, $7}')
 LAST_IP=$(echo "$LAST_LOGIN" | awk '{print $3}')
 
 echo -e "${COLOR_TITLE}=== Session Info ===${RESET}"
-printf "${COLOR_LABEL}%-22s${COLOR_VALUE}%s ${COLOR_YELLOW}from $LAST_IP${RESET}\n" "Last login:" "$LAST_DATE"
+printf "${COLOR_LABEL}%-22s${COLOR_VALUE}%s${RESET}\n" "Last login:" "$LAST_DATE from $LAST_IP"
 printf "${COLOR_LABEL}%-22s${COLOR_VALUE}%s${RESET}\n" "User:" "$(whoami)"
 printf "${COLOR_LABEL}%-22s${COLOR_VALUE}%s${RESET}\n" "Uptime:" "$(uptime -p | sed 's/up //')"
 
@@ -53,58 +69,44 @@ echo -e "\n${COLOR_TITLE}=== System Info ===${RESET}"
 printf "${COLOR_LABEL}%-22s${COLOR_VALUE}%s${RESET}\n" "Hostname:" "$(hostname)"
 printf "${COLOR_LABEL}%-22s${COLOR_VALUE}%s${RESET}\n" "OS:" "$(lsb_release -ds 2>/dev/null || grep PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '\"')"
 printf "${COLOR_LABEL}%-22s${COLOR_VALUE}%s${RESET}\n" "Kernel:" "$(uname -r)"
-EXTERNAL_IP="$(hostname -I | awk '{print $1}')"
-printf "${COLOR_LABEL}%-22s${COLOR_YELLOW}%s${RESET}\n" "External IP:" "$EXTERNAL_IP"
+printf "${COLOR_LABEL}%-22s${COLOR_VALUE}%s${RESET}\n" "External IP:" "$(hostname -I | awk '{print $1}')"
 
-if [ "$SHOW_CPU" = true ]; then
+[ "$SHOW_CPU" = true ] && {
   echo -e "\n${COLOR_TITLE}=== CPU ===${RESET}"
   CPU_MODEL=$(grep -m1 "model name" /proc/cpuinfo | cut -d ':' -f2 | sed 's/^ //')
   CPU_IDLE=$(vmstat 1 2 | tail -1 | awk '{print $15}')
   CPU_USAGE=$((100 - CPU_IDLE))
   LOAD_AVG=$(cat /proc/loadavg | awk '{print $1 " / " $2 " / " $3}')
 
-  # CPU usage bar
-  BAR_LENGTH=30
-  FILLED=$((CPU_USAGE * BAR_LENGTH / 100))
-  EMPTY=$((BAR_LENGTH - FILLED))
-  if (( CPU_USAGE < 50 )); then BAR_COLOR=$COLOR_GREEN
-  elif (( CPU_USAGE < 80 )); then BAR_COLOR=$COLOR_YELLOW
-  else BAR_COLOR=$COLOR_RED; fi
-  CPU_BAR="${BAR_COLOR}$(printf '■%.0s' $(seq 1 $FILLED))${RESET}$(printf '·%.0s' $(seq 1 $EMPTY))"
-
   printf "${COLOR_LABEL}%-22s${COLOR_VALUE}%s${RESET}\n" "Model:" "$CPU_MODEL"
-  printf "${COLOR_LABEL}%-22s%s %s%%${RESET}\n" "Usage:" "$CPU_BAR" "$CPU_USAGE"
+  printf "${COLOR_LABEL}%-22s" "Usage:"
+  bar "$CPU_USAGE" 100
+  echo
   printf "${COLOR_LABEL}%-22s${COLOR_VALUE}%s${RESET}\n" "Load average:" "$LOAD_AVG"
-fi
+}
 
-if [ "$SHOW_MEM" = true ]; then
+[ "$SHOW_MEM" = true ] && {
   echo -e "\n${COLOR_TITLE}=== Memory & Disk ===${RESET}"
+  MEM_TOTAL=$(free -m | awk '/Mem:/ {print $2}')
+  MEM_USED=$(free -m | awk '/Mem:/ {print $3}')
+  printf "${COLOR_LABEL}%-22s" "Memory:"
+  bar "$MEM_USED" "$MEM_TOTAL"
+  echo
 
-  read MEM_USED MEM_TOTAL <<< $(free -m | awk '/^Mem:/ {print $3, $2}')
-  MEM_PERC=$((100 * MEM_USED / MEM_TOTAL))
-  FILLED=$((MEM_PERC * BAR_LENGTH / 100))
-  EMPTY=$((BAR_LENGTH - FILLED))
-  [ "$MEM_PERC" -lt 50 ] && BAR_COLOR=$COLOR_GREEN || [ "$MEM_PERC" -lt 80 ] && BAR_COLOR=$COLOR_YELLOW || BAR_COLOR=$COLOR_RED
-  MEM_BAR="${BAR_COLOR}$(printf '■%.0s' $(seq 1 $FILLED))${RESET}$(printf '·%.0s' $(seq 1 $EMPTY))"
-  printf "${COLOR_LABEL}%-22s%s %s%%${RESET}\n" "Memory Usage:" "$MEM_BAR" "$MEM_PERC"
+  DISK_USED=$(df -m / | awk 'NR==2{print $3}')
+  DISK_TOTAL=$(df -m / | awk 'NR==2{print $2}')
+  printf "${COLOR_LABEL}%-22s" "Disk (/):"
+  bar "$DISK_USED" "$DISK_TOTAL"
+  echo
+}
 
-  DISK_INFO=$(df -m / | awk 'NR==2{print $3, $2}')
-  DISK_USED=${DISK_INFO%% *}
-  DISK_TOTAL=${DISK_INFO##* }
-  DISK_PERC=$((100 * DISK_USED / DISK_TOTAL))
-  FILLED=$((DISK_PERC * BAR_LENGTH / 100))
-  EMPTY=$((BAR_LENGTH - FILLED))
-  [ "$DISK_PERC" -lt 50 ] && BAR_COLOR=$COLOR_GREEN || [ "$DISK_PERC" -lt 80 ] && BAR_COLOR=$COLOR_YELLOW || BAR_COLOR=$COLOR_RED
-  DISK_BAR="${BAR_COLOR}$(printf '■%.0s' $(seq 1 $FILLED))${RESET}$(printf '·%.0s' $(seq 1 $EMPTY))"
-  printf "${COLOR_LABEL}%-22s%s %s%%${RESET}\n" "Disk Usage (/):" "$DISK_BAR" "$DISK_PERC"
-fi
-
-if [ "$SHOW_NET" = true ]; then
+[ "$SHOW_NET" = true ] && {
   echo -e "\n${COLOR_TITLE}=== Network ===${RESET}"
   NET_IFACE=$(ip route get 8.8.8.8 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}')
   if [ -n "$NET_IFACE" ]; then
     RX_BYTES=$(cat /sys/class/net/$NET_IFACE/statistics/rx_bytes)
     TX_BYTES=$(cat /sys/class/net/$NET_IFACE/statistics/tx_bytes)
+
     human_readable() {
       local BYTES=$1
       local UNITS=('B' 'KB' 'MB' 'GB' 'TB')
@@ -115,38 +117,37 @@ if [ "$SHOW_NET" = true ]; then
       done
       echo "${BYTES} ${UNITS[$UNIT]}"
     }
+
     RX_HR=$(human_readable $RX_BYTES)
     TX_HR=$(human_readable $TX_BYTES)
+
     printf "${COLOR_LABEL}%-22s${COLOR_VALUE}%s${RESET}\n" "Interface:" "$NET_IFACE"
     printf "${COLOR_LABEL}%-22s${COLOR_VALUE}%s${RESET}\n" "Received:" "$RX_HR"
     printf "${COLOR_LABEL}%-22s${COLOR_VALUE}%s${RESET}\n" "Transmitted:" "$TX_HR"
   else
     printf "${COLOR_LABEL}%-22s${COLOR_VALUE}%s${RESET}\n" "Network:" "Interface not found"
   fi
-fi
+}
 
-if [ "$SHOW_FIREWALL" = true ]; then
+[ "$SHOW_FIREWALL" = true ] && {
   echo -e "\n${COLOR_TITLE}=== Firewall ===${RESET}"
   if command -v ufw &>/dev/null; then
-    STATUS_LINE=$(ufw status | head -1)
-    if echo "$STATUS_LINE" | grep -iq "active"; then
-      STATUS_COLORED="${COLOR_GREEN}${STATUS_LINE}${RESET}"
-    else
-      STATUS_COLORED="${COLOR_RED}${STATUS_LINE}${RESET}"
-    fi
-    printf "${COLOR_LABEL}%-22s%s\n" "UFW Status:" "$STATUS_COLORED"
+    STATUS=$(ufw status | head -1)
+    printf "${COLOR_LABEL}%-22s${COLOR_VALUE}%s${RESET}\n" "UFW Status:" "$STATUS"
   else
     printf "${COLOR_LABEL}%-22s${COLOR_VALUE}%s${RESET}\n" "UFW:" "not installed"
   fi
-fi
+}
 
-if [ "$SHOW_DOCKER" = true ]; then
+[ "$SHOW_DOCKER" = true ] && {
   echo -e "\n${COLOR_TITLE}=== Docker ===${RESET}"
   if command -v docker &>/dev/null; then
     RUNNING_CONTAINERS=$(docker ps -q | wc -l)
     TOTAL_CONTAINERS=$(docker ps -a -q | wc -l)
-    printf "${COLOR_LABEL}%-22s${COLOR_VALUE}%s${RESET}\n" "Containers (running/total):" "$RUNNING_CONTAINERS / $TOTAL_CONTAINERS"
+    printf "${COLOR_LABEL}%-22s${COLOR_VALUE}%s${RESET}\n" "Containers:" "$RUNNING_CONTAINERS / $TOTAL_CONTAINERS"
+
     if [ "$RUNNING_CONTAINERS" -gt 0 ]; then
+      echo -e "${COLOR_LABEL}Running Containers:${RESET}"
       docker ps --format '{{.Names}}' | paste - - | while read line; do
         printf "  ${COLOR_VALUE}%-30s%-30s${RESET}\n" $line
       done
@@ -154,7 +155,7 @@ if [ "$SHOW_DOCKER" = true ]; then
   else
     printf "${COLOR_LABEL}%-22s${COLOR_VALUE}%s${RESET}\n" "Docker:" "not installed"
   fi
-fi
+}
 
 echo
 EOF
@@ -164,8 +165,7 @@ rm -f /etc/motd
 ln -sf /var/run/motd /etc/motd
 ln -sf /etc/update-motd.d/00-remnawave /usr/local/bin/rw-motd
 
-echo "Installing 'rw-motd-set' menu..."
-
+echo "🔧 Installing 'rw-motd-set' configuration menu..."
 cat << 'EOF' > /usr/local/bin/rw-motd-set
 #!/bin/bash
 
@@ -173,8 +173,8 @@ CONFIG="/etc/rw-motd.conf"
 
 CHOICES=$(whiptail --title "MOTD Settings" --checklist \
 "Выберите, что отображать в MOTD:" 20 60 10 \
-"SHOW_LOGO" "Показывать логотип" $(grep -q 'SHOW_LOGO=true' "$CONFIG" && echo ON || echo OFF) \
-"SHOW_CPU" "Загрузка CPU" $(grep -q 'SHOW_CPU=true' "$CONFIG" && echo ON || echo OFF) \
+"SHOW_LOGO" "Показ логотипа Remnawave" $(grep -q 'SHOW_LOGO=true' "$CONFIG" && echo ON || echo OFF) \
+"SHOW_CPU" "Загрузка процессора" $(grep -q 'SHOW_CPU=true' "$CONFIG" && echo ON || echo OFF) \
 "SHOW_MEM" "Память и диск" $(grep -q 'SHOW_MEM=true' "$CONFIG" && echo ON || echo OFF) \
 "SHOW_NET" "Сетевой трафик" $(grep -q 'SHOW_NET=true' "$CONFIG" && echo ON || echo OFF) \
 "SHOW_FIREWALL" "Статус UFW" $(grep -q 'SHOW_FIREWALL=true' "$CONFIG" && echo ON || echo OFF) \
@@ -189,9 +189,10 @@ for VAR in SHOW_LOGO SHOW_CPU SHOW_MEM SHOW_NET SHOW_FIREWALL SHOW_DOCKER; do
   fi
 done
 
-echo "Настройки обновлены. Проверь командой: rw-motd"
+echo "✅ Настройки обновлены. Проверь командой: rw-motd"
 EOF
 
 chmod +x /usr/local/bin/rw-motd-set
 
-echo "✅ Установка завершена. Используйте команду 'rw-motd' для ручного вывода или 'rw-motd-set' для настройки отображения."
+echo "✅ Установка завершена!"
+echo "📟 Используй 'rw-motd' для ручного вызова, или 'rw-motd-set' для настройки."
